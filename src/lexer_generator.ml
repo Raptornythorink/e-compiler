@@ -45,19 +45,41 @@ let empty_nfa =
 
 (* Concaténation de NFAs.  *)
 let cat_nfa n1 n2 =
-   (* TODO *)
-   empty_nfa
+  {
+    nfa_states = n1.nfa_states @ n2.nfa_states;
+    nfa_initial = n1.nfa_initial;
+    nfa_final = n2.nfa_final;
+    nfa_step = fun q -> let nfa_final_states = List.map (fun (q,_) -> q) n1.nfa_final in 
+                        if List.mem q nfa_final_states
+                        then n1.nfa_step q @ List.map (fun q_2 -> (None,q_2)) n2.nfa_initial 
+                        else if List.mem q n1.nfa_states 
+                        then n1.nfa_step q 
+                        else n2.nfa_step q
+  }
 
 (* Alternatives de NFAs *)
 let alt_nfa n1 n2 =
-   (* TODO *)
-   empty_nfa
+  {
+    nfa_states = n1.nfa_states @ n2.nfa_states;
+    nfa_initial = n1.nfa_initial @ n2.nfa_initial;
+    nfa_final = n1.nfa_final@ n2.nfa_final;
+    nfa_step = fun q -> if List.mem q n1.nfa_states 
+                        then n1.nfa_step q else n2.nfa_step q
+  }
+   
 
 (* Répétition de NFAs *)
 (* t est de type [string -> token option] *)
 let star_nfa n t =
-   (* TODO *)
-   empty_nfa
+   {
+    nfa_states = n.nfa_states;
+    nfa_initial = n.nfa_initial;
+    nfa_final = List.map (fun q->(q,t)) n.nfa_initial;
+    nfa_step = fun q -> let nfa_final_states = List.map (fun (q,_) -> q) n.nfa_final in 
+                        if List.mem q nfa_final_states
+                        then n.nfa_step q @List.map (fun q_2 -> (None,q_2)) n.nfa_initial
+                        else n.nfa_step q
+   }
 
 
 (* [nfa_of_regexp r freshstate t] construit un NFA qui reconnaît le même langage
@@ -77,8 +99,13 @@ let rec nfa_of_regexp r freshstate t =
                 nfa_final = [freshstate + 1, t];
                 nfa_step = fun q -> if q = freshstate then [(Some c, freshstate + 1)] else []
               }, freshstate + 2
-   (* TODO *)
-   | _ -> empty_nfa, freshstate
+  | Cat (r1, r2) -> let (n1,freshstate1) = nfa_of_regexp r1 freshstate t in
+                    let (n2,freshstate2) = nfa_of_regexp r2 freshstate1 t in
+                    (cat_nfa n1 n2, freshstate2)
+  | Alt (r1,r2) ->  let (n1,freshstate1) = nfa_of_regexp r1 freshstate t in
+                    let (n2,freshstate2) = nfa_of_regexp r2 freshstate1 t in
+                    (alt_nfa n1 n2,freshstate2)
+  | Star r -> let (n,freshstate_star) = nfa_of_regexp r freshstate t in (star_nfa n t, freshstate_star)
 
 (* Deterministic Finite Automaton (DFA) *)
 
