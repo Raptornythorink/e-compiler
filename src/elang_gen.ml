@@ -44,9 +44,15 @@ let binop_of_tag =
 let rec make_eexpr_of_ast (a: tree) : expr res =
   let res =
     match a with
-    | Node(t, [e1; e2]) when tag_is_binop t ->
-         Error (Printf.sprintf "Unacceptable ast in make_eexpr_of_ast %s"
-                        (string_of_ast a))
+    | Node(t, [e1; e2]) when tag_is_binop t -> 
+      make_eexpr_of_ast e1 >>= fun exp1 ->
+      make_eexpr_of_ast e2 >>= fun exp2 ->
+      OK (Ebinop (binop_of_tag t, exp1, exp2))
+    | Node(Tneg, [e]) -> 
+      make_eexpr_of_ast e >>= fun exp ->
+      OK (Eunop (Eneg, exp))
+    | Node(Tint, [IntLeaf i]) -> OK (Eint i)
+    | StringLeaf s -> OK (Evar s)
     | _ -> Error (Printf.sprintf "Unacceptable ast in make_eexpr_of_ast %s"
                     (string_of_ast a))
   in
@@ -58,7 +64,34 @@ let rec make_eexpr_of_ast (a: tree) : expr res =
 let rec make_einstr_of_ast (a: tree) : instr res =
   let res =
     match a with
-    (* TODO *)
+    | NullLeaf -> OK(Iblock([]))
+    | Node(Tassign, [StringLeaf(var); e]) ->
+      make_eexpr_of_ast e >>= fun exp ->
+      OK (Iassign (var, exp))
+    | Node(Tassign, [Node(Tassignvar, [StringLeaf(var); e])]) ->
+      make_eexpr_of_ast e >>= fun exp ->
+        OK (Iassign (var, exp))
+    | Node(Tassignvar, [StringLeaf(var); e]) ->
+      make_eexpr_of_ast e >>= fun exp ->
+      OK (Iassign (var, exp))
+    | Node(Tif, [e; i1; i2]) ->
+      make_eexpr_of_ast e >>= fun exp ->
+      make_einstr_of_ast i1 >>= fun instr1 ->
+      make_einstr_of_ast i2 >>= fun instr2 ->
+      OK (Iif (exp, instr1, instr2))
+    | Node(Twhile, [e; i]) ->
+      make_eexpr_of_ast e >>= fun exp ->
+      make_einstr_of_ast i >>= fun instr ->
+      OK (Iwhile (exp, instr))
+    | Node(Tblock, l) ->
+      list_map_res make_einstr_of_ast l >>= fun instrs ->
+      OK (Iblock instrs)
+    | Node(Treturn, [e]) ->
+      make_eexpr_of_ast e >>= fun exp ->
+      OK (Ireturn exp)
+    | Node(Tprint, [e]) ->
+      make_eexpr_of_ast e >>= fun exp ->
+      OK (Iprint exp)
     | _ -> Error (Printf.sprintf "Unacceptable ast in make_einstr_of_ast %s"
                     (string_of_ast a))
   in
@@ -76,10 +109,10 @@ let make_ident (a: tree) : string res =
 
 let make_fundef_of_ast (a: tree) : (string * efun) res =
   match a with
-  | Node (Tfundef, [StringLeaf fname; Node (Tfunargs, fargs); fbody]) ->
-    list_map_res make_ident fargs >>= fun fargs ->
-     (* TODO *)
-     Error "make_fundef_of_ast: Not implemented, yet."
+  | Node (Tfundef, [Node(Tfunname, [StringLeaf(fname)]); Node (Tfunargs, fargs); Node(Tfunbody, [fbody])]) ->
+    list_map_res make_ident fargs >>= fun funargs ->
+    make_einstr_of_ast fbody >>= fun funbody ->
+     OK( (fname, { funargs = funargs; funbody = funbody }))
   | _ ->
     Error (Printf.sprintf "make_fundef_of_ast: Expected a Tfundef, got %s."
              (string_of_ast a))
