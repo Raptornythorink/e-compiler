@@ -212,7 +212,8 @@ let assoc_merge_vals (l : ('a * 'b) list) : ('a * 'b set) list =
       | Some vl -> (k, Set.add v vl)::List.remove_assoc k acc
     ) [] l
 
-let rec build_dfa_table (table: (dfa_state, (char * dfa_state) list) Hashtbl.t)
+let rec build_dfa_table 
+    (table: (dfa_state, (char * dfa_state) list) Hashtbl.t)
     (n: nfa)
     (ds: dfa_state) : unit =
   match Hashtbl.find_option table ds with
@@ -221,9 +222,9 @@ let rec build_dfa_table (table: (dfa_state, (char * dfa_state) list) Hashtbl.t)
     (* [transitions] contient les transitions du DFA construites
      * à partir des transitions du NFA comme décrit auparavant *)
     let transitions : (char * dfa_state) list =
-         (* TODO *)
-         []
-      in
+        let t = Set.fold (fun (ns : nfa_state) acc -> (n.nfa_step ns) @ acc) ds [] in 
+        let merged =  assoc_merge_vals (assoc_distribute_key (assoc_throw_none t)) 
+      in List.map (fun (c,q) -> (c, epsilon_closure_set n q)) merged in
     Hashtbl.replace table ds transitions;
     List.iter (build_dfa_table table n) (List.map snd transitions)
 
@@ -257,24 +258,30 @@ let priority t =
 (* [min_priority l] renvoie le token de [l] qui a la plus petite priorité, ou
    [None] si la liste [l] est vide. *)
 let min_priority (l: token list) : token option =
-   (* TODO *)
-   None
+   match l with
+   | [] -> None
+   | t::q -> List.fold (fun min t' -> if (priority t' < priority t) then Some t' else min) (Some t) q 
+   
 
 (* [dfa_final_states n dfa_states] renvoie la liste des états finaux du DFA,
    accompagnés du token qu'ils reconnaissent. *)
 let dfa_final_states (n: nfa) (dfa_states: dfa_state list) :
   (dfa_state * (string -> token option)) list  =
-   (* TODO *)
-   []
+  List.filter_map (fun dfas ->
+    let nfa_finals = List.filter (fun q -> List.mem_assoc q n.nfa_final) (Set.to_list dfas) in
+    match nfa_finals with
+    | [] -> None
+    | _ -> let tokens = List.filter_map (fun q -> List.assoc_opt q n.nfa_final) nfa_finals in
+      Some (dfas, fun s -> min_priority (List.filter_map (fun f -> f s) tokens))
+    ) dfa_states
 
 (* Construction de la relation de transition du DFA. *)
 
 (* [make_dfa_step table] construit la fonction de transition du DFA, où [table]
    est la table générée par [build_dfa_table], définie ci-dessus. *)
 let make_dfa_step (table: (dfa_state, (char * dfa_state) list) Hashtbl.t) =
-  fun (q: dfa_state) (a: char) ->
-   (* TODO *)
-   None
+  fun (q: dfa_state) (a: char) -> 
+    List.assoc_opt a (Hashtbl.find table q)
 
 (* Finalement, on assemble tous ces morceaux pour construire l'automate. La
    fonction [dfa_of_nfa n] vous est grâcieusement offerte. *)
