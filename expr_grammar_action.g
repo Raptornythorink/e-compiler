@@ -50,16 +50,7 @@ INSTR -> SYM_RETURN EXPR SYM_SEMICOLON { Node(Treturn, [$2]) }
 INSTR -> SYM_PRINT SYM_LPARENTHESIS EXPR SYM_RPARENTHESIS SYM_SEMICOLON { Node(Tprint, [$3])}
 ELSE -> SYM_ELSE LINSTRS { $2 }
 ELSE -> { NullLeaf}
-EXPR -> ADD_EXPR ADD_EXPRS { resolve_associativity $1 $2 }
-ADD_EXPRS -> SYM_PLUS ADD_EXPR ADD_EXPRS { (Tadd, $2)::$3 }
-ADD_EXPRS -> SYM_MINUS ADD_EXPR ADD_EXPRS { (Tsub, $2)::$3 }
-ADD_EXPRS -> { [] }
-ADD_EXPR -> MUL_EXPR MUL_EXPRS { resolve_associativity $1 $2 }
-MUL_EXPRS -> SYM_ASTERISK MUL_EXPR MUL_EXPRS { (Tmul, $2)::$3 }
-MUL_EXPRS -> SYM_DIV MUL_EXPR MUL_EXPRS { (Tdiv, $2)::$3 }
-MUL_EXPRS -> SYM_MOD MUL_EXPR MUL_EXPRS { (Tmod, $2)::$3 }
-MUL_EXPRS -> { [] }
-MUL_EXPR -> CMP_EXPR CMP_EXPRS { resolve_associativity $1 $2 }
+EXPR -> CMP_EXPR CMP_EXPRS { resolve_associativity $1 $2 }
 CMP_EXPRS -> SYM_LT CMP_EXPR CMP_EXPRS { (Tclt, $2)::$3 }
 CMP_EXPRS -> SYM_LEQ CMP_EXPR CMP_EXPRS { (Tcle, $2)::$3 }
 CMP_EXPRS -> SYM_GT CMP_EXPR CMP_EXPRS { (Tcgt, $2)::$3 }
@@ -69,7 +60,16 @@ CMP_EXPR -> EQ_EXPR EQ_EXPRS { resolve_associativity $1 $2 }
 EQ_EXPRS -> SYM_EQUALITY EQ_EXPR EQ_EXPRS { (Tceq, $2)::$3 }
 EQ_EXPRS -> SYM_NOTEQ EQ_EXPR EQ_EXPRS { (Tne, $2)::$3 }
 EQ_EXPRS -> { [] }
-EQ_EXPR -> FACTOR { $1 }
+EQ_EXPR -> ADD_EXPR ADD_EXPRS { resolve_associativity $1 $2 }
+ADD_EXPRS -> SYM_PLUS ADD_EXPR ADD_EXPRS { (Tadd, $2)::$3 }
+ADD_EXPRS -> SYM_MINUS ADD_EXPR ADD_EXPRS { (Tsub, $2)::$3 }
+ADD_EXPRS -> { [] }
+ADD_EXPR -> MUL_EXPR MUL_EXPRS { resolve_associativity $1 $2 }
+MUL_EXPRS -> SYM_ASTERISK MUL_EXPR MUL_EXPRS { (Tmul, $2)::$3 }
+MUL_EXPRS -> SYM_DIV MUL_EXPR MUL_EXPRS { (Tdiv, $2)::$3 }
+MUL_EXPRS -> SYM_MOD MUL_EXPR MUL_EXPRS { (Tmod, $2)::$3 }
+MUL_EXPRS -> { [] }
+MUL_EXPR -> FACTOR { $1 }
 FACTOR -> IDENTIFIER { $1 }
 FACTOR -> INTEGER { Node(Tint, [$1]) }
 FACTOR -> SYM_LPARENTHESIS EXPR SYM_RPARENTHESIS { $2 }
