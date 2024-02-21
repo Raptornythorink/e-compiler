@@ -45,20 +45,38 @@ let empty_nfa =
 
 (* Concaténation de NFAs.  *)
 let cat_nfa n1 n2 =
-   (* TODO *)
-   empty_nfa
+  {
+    nfa_states = n1.nfa_states @ n2.nfa_states;
+    nfa_initial = n1.nfa_initial;
+    nfa_final = n2.nfa_final;
+    nfa_step = fun q ->
+      if List.mem_assoc q n1.nfa_final
+        then n1.nfa_step q @ n2.nfa_step q @ List.map (fun q' -> (None, q')) n2.nfa_initial
+        else n1.nfa_step q @ n2.nfa_step q
+  }
 
 (* Alternatives de NFAs *)
 let alt_nfa n1 n2 =
-   (* TODO *)
-   empty_nfa
+  {
+    nfa_states = n1.nfa_states @ n2.nfa_states;
+    nfa_initial = n1.nfa_initial @ n2.nfa_initial;
+    nfa_final = n1.nfa_final @ n2.nfa_final;
+    nfa_step = fun q -> n1.nfa_step q @ n2.nfa_step q
+  
+  }
 
 (* Répétition de NFAs *)
 (* t est de type [string -> token option] *)
 let star_nfa n t =
-   (* TODO *)
-   empty_nfa
-
+   {
+    nfa_states = n.nfa_states;
+    nfa_initial = n.nfa_initial;
+    nfa_final = List.map (fun q -> (q, t)) n.nfa_initial;
+    nfa_step = fun q ->
+      if List.filter (fun (q',_) -> q' = q) n.nfa_final <> []
+        then n.nfa_step q @ List.map (fun q' -> (None, q')) n.nfa_initial
+        else n.nfa_step q
+   }
 
 (* [nfa_of_regexp r freshstate t] construit un NFA qui reconnaît le même langage
    que l'expression régulière [r].
@@ -77,8 +95,14 @@ let rec nfa_of_regexp r freshstate t =
                 nfa_final = [freshstate + 1, t];
                 nfa_step = fun q -> if q = freshstate then [(Some c, freshstate + 1)] else []
               }, freshstate + 2
-   (* TODO *)
-   | _ -> empty_nfa, freshstate
+   | Cat(r1, r2) -> let n1, freshtate1 = nfa_of_regexp r1 freshstate t in
+                    let n2, freshtate2 = nfa_of_regexp r2 freshtate1 t in
+                    cat_nfa n1 n2, freshtate2
+   | Alt(r1, r2) -> let n1, freshtate1 = nfa_of_regexp r1 freshstate t in
+                    let n2, freshtate2 = nfa_of_regexp r2 freshtate1 t in
+                    alt_nfa n1 n2, freshtate2
+   | Star r1 -> let n1, freshtate1 = nfa_of_regexp r1 freshstate t in
+                star_nfa n1 t, freshtate1
 
 (* Deterministic Finite Automaton (DFA) *)
 
@@ -119,22 +143,21 @@ let epsilon_closure (n: nfa) (s: nfa_state) : nfa_state set =
   (* La fonction [traversal visited s] effectue un parcours de l'automate en
      partant de l'état [s], et en suivant uniquement les epsilon-transitions. *)
   let rec traversal (visited: nfa_state set) (s: nfa_state) : nfa_state set =
-         (* TODO *)
-         visited
+    if Set.mem s visited then visited else
+    let epsilon_transitions = List.filter (fun (cso, _) -> cso = None) (n.nfa_step s) in
+    let nvisited = Set.add s visited in
+    List.fold_left (fun v (_, q) -> traversal v q) nvisited epsilon_transitions
   in
   traversal Set.empty s
 
 (* [epsilon_closure_set n ls] calcule l'union des epsilon-fermeture de chacun
    des états du NFA [n] dans l'ensemble [ls]. *)
 let epsilon_closure_set (n: nfa) (ls: nfa_state set) : nfa_state set =
-   (* TODO *)
-   ls
+   Set.fold (fun s acc -> Set.union acc (epsilon_closure n s)) ls Set.empty
 
 (* [dfa_initial_state n] calcule l'état initial de l'automate déterminisé. *)
 let dfa_initial_state (n: nfa) : dfa_state =
-   (* TODO *)
-   Set.empty
-
+   epsilon_closure_set n (Set.of_list n.nfa_initial)
 (* Construction de la table de transitions de l'automate DFA. *)
 
 (* Comme vu en cours, pour construire la table de l'automate DFA à partir de
@@ -189,9 +212,13 @@ let rec build_dfa_table (table: (dfa_state, (char * dfa_state) list) Hashtbl.t)
     (* [transitions] contient les transitions du DFA construites
      * à partir des transitions du NFA comme décrit auparavant *)
     let transitions : (char * dfa_state) list =
-         (* TODO *)
-         []
-      in
+      let t = List.fold_left (@) [] (List.map (fun q -> n.nfa_step q) (Set.to_list ds)) in
+      let eps_filtered_t = assoc_throw_none t in
+      let transformed_t = assoc_distribute_key eps_filtered_t in
+      let merged_t = assoc_merge_vals transformed_t in
+      let eps_t = List.map (fun (c, q) -> (c, epsilon_closure_set n q)) merged_t in
+      eps_t
+    in
     Hashtbl.replace table ds transitions;
     List.iter (build_dfa_table table n) (List.map snd transitions)
 
@@ -225,15 +252,23 @@ let priority t =
 (* [min_priority l] renvoie le token de [l] qui a la plus petite priorité, ou
    [None] si la liste [l] est vide. *)
 let min_priority (l: token list) : token option =
-   (* TODO *)
-   None
+   List.fold_left (fun acc t ->
+      match acc with
+      | None -> Some t
+      | Some t' -> if priority t < priority t' then Some t else acc
+    ) None l
 
 (* [dfa_final_states n dfa_states] renvoie la liste des états finaux du DFA,
    accompagnés du token qu'ils reconnaissent. *)
 let dfa_final_states (n: nfa) (dfa_states: dfa_state list) :
   (dfa_state * (string -> token option)) list  =
-   (* TODO *)
-   []
+  List.filter_map (fun dfas ->
+    let nfa_finals = List.filter (fun q -> List.mem_assoc q n.nfa_final) (Set.to_list dfas) in
+    match nfa_finals with
+    | [] -> None
+    | _ -> let tokens = List.filter_map (fun q -> List.assoc_opt q n.nfa_final) nfa_finals in
+      Some (dfas, fun s -> min_priority (List.filter_map (fun f -> f s) tokens))
+    ) dfa_states
 
 (* Construction de la relation de transition du DFA. *)
 
@@ -241,8 +276,8 @@ let dfa_final_states (n: nfa) (dfa_states: dfa_state list) :
    est la table générée par [build_dfa_table], définie ci-dessus. *)
 let make_dfa_step (table: (dfa_state, (char * dfa_state) list) Hashtbl.t) =
   fun (q: dfa_state) (a: char) ->
-   (* TODO *)
-   None
+    List.assoc_opt a (Hashtbl.find table q)
+
 
 (* Finalement, on assemble tous ces morceaux pour construire l'automate. La
    fonction [dfa_of_nfa n] vous est grâcieusement offerte. *)
@@ -309,8 +344,21 @@ let tokenize_one (d : dfa) (w: char list) : lexer_result * char list =
   let rec recognize (q: dfa_state) (w: char list)
       (current_token: char list) (last_accepted: lexer_result * char list)
     : lexer_result * char list =
-         (* TODO *)
-         last_accepted
+    match w with
+    | [] -> (match last_accepted with
+      | LRerror, remaining -> LRtoken(SYM_EOF), remaining
+      | _ -> last_accepted)
+    | c::w' -> match d.dfa_step q c with
+      | None -> last_accepted
+      | Some q' ->
+        let current_token' = current_token@[c] in
+        if List.mem_assoc q' d.dfa_final
+          then recognize q' w' current_token' (match List.assoc_opt q' d.dfa_final with
+        | None -> LRerror, w'
+        | Some t -> (match t (string_of_char_list current_token') with
+          | None -> LRskip, w'
+          | Some token -> LRtoken (token), w')
+          ) else recognize q' w' current_token' last_accepted
   in
   recognize d.dfa_initial w [] (LRerror, w)
 
