@@ -21,18 +21,17 @@ type 'a set = 'a Set.t
    - [nfa_step q] donne la liste des transitions depuis l'état [q] sous la
      forme d'une liste [(charset, q')]. [charset] est l'ensemble des caractères
      qui permettent de prendre la transition vers l'état [q']. [charset] peut
-     éventuellement être [None], ce qui indique une epsilon-transition. 
+     éventuellement être [None], ce qui indique une epsilon-transition.
 *)
 
 type nfa_state = int
 
-type nfa =
-  {
-    nfa_states: nfa_state list;
-    nfa_initial: nfa_state list;
-    nfa_final: (nfa_state * (string -> token option)) list;
-    nfa_step: nfa_state -> (char set option * nfa_state) list
-  }
+type nfa = {
+  nfa_states : nfa_state list;
+  nfa_initial : nfa_state list;
+  nfa_final : (nfa_state * (string -> token option)) list;
+  nfa_step : nfa_state -> (char set option * nfa_state) list;
+}
 
 (* [empty_nfa] est un NFA vide. *)
 let empty_nfa =
@@ -40,7 +39,7 @@ let empty_nfa =
     nfa_states = [];
     nfa_initial = [];
     nfa_final = [];
-    nfa_step = fun q -> [];
+    nfa_step = (fun q -> []);
   }
 
 (* Concaténation de NFAs.  *)
@@ -49,12 +48,13 @@ let cat_nfa n1 n2 =
     nfa_states = n1.nfa_states @ n2.nfa_states;
     nfa_initial = n1.nfa_initial;
     nfa_final = n2.nfa_final;
-    nfa_step = fun q -> let nfa_final_states = List.map (fun (q,_) -> q) n1.nfa_final in 
-                        if List.mem q nfa_final_states
-                        then n1.nfa_step q @ List.map (fun q_2 -> (None,q_2)) n2.nfa_initial 
-                        else if List.mem q n1.nfa_states 
-                        then n1.nfa_step q 
-                        else n2.nfa_step q
+    nfa_step =
+      (fun q ->
+        let nfa_final_states = List.map (fun (q, _) -> q) n1.nfa_final in
+        if List.mem q nfa_final_states then
+          n1.nfa_step q @ List.map (fun q_2 -> (None, q_2)) n2.nfa_initial
+        else if List.mem q n1.nfa_states then n1.nfa_step q
+        else n2.nfa_step q);
   }
 
 (* Alternatives de NFAs *)
@@ -62,50 +62,64 @@ let alt_nfa n1 n2 =
   {
     nfa_states = n1.nfa_states @ n2.nfa_states;
     nfa_initial = n1.nfa_initial @ n2.nfa_initial;
-    nfa_final = n1.nfa_final@ n2.nfa_final;
-    nfa_step = fun q -> if List.mem q n1.nfa_states 
-                        then n1.nfa_step q else n2.nfa_step q
+    nfa_final = n1.nfa_final @ n2.nfa_final;
+    nfa_step =
+      (fun q ->
+        if List.mem q n1.nfa_states then n1.nfa_step q else n2.nfa_step q);
   }
-   
 
 (* Répétition de NFAs *)
 (* t est de type [string -> token option] *)
 let star_nfa n t =
-   {
+  {
     nfa_states = n.nfa_states;
     nfa_initial = n.nfa_initial;
-    nfa_final = List.map (fun q->(q,t)) n.nfa_initial;
-    nfa_step = fun q -> let nfa_final_states = List.map (fun (q,_) -> q) n.nfa_final in 
-                        if List.mem q nfa_final_states
-                        then n.nfa_step q @List.map (fun q_2 -> (None,q_2)) n.nfa_initial
-                        else n.nfa_step q
-   }
-
+    nfa_final = List.map (fun q -> (q, t)) n.nfa_initial;
+    nfa_step =
+      (fun q ->
+        let nfa_final_states = List.map (fun (q, _) -> q) n.nfa_final in
+        if List.mem q nfa_final_states then
+          n.nfa_step q @ List.map (fun q_2 -> (None, q_2)) n.nfa_initial
+        else n.nfa_step q);
+  }
 
 (* [nfa_of_regexp r freshstate t] construit un NFA qui reconnaît le même langage
    que l'expression régulière [r].
-   [freshstate] correspond à un entier pour lequel il n'y a pas encore d'état dans 
+   [freshstate] correspond à un entier pour lequel il n'y a pas encore d'état dans
    le nfa. Il suffit d'incrémenter [freshstate] pour obtenir de nouveaux états non utilisés.
    [t] est une fonction du type [string -> token option] utile pour les états finaux.
 *)
 let rec nfa_of_regexp r freshstate t =
   match r with
-  | Eps -> { nfa_states = [freshstate];
-             nfa_initial = [freshstate];
-             nfa_final = [(freshstate,t)];
-             nfa_step = fun q -> []}, freshstate + 1
-  | Charset c -> { nfa_states = [freshstate; freshstate + 1];
-                nfa_initial = [freshstate];
-                nfa_final = [freshstate + 1, t];
-                nfa_step = fun q -> if q = freshstate then [(Some c, freshstate + 1)] else []
-              }, freshstate + 2
-  | Cat (r1, r2) -> let (n1,freshstate1) = nfa_of_regexp r1 freshstate t in
-                    let (n2,freshstate2) = nfa_of_regexp r2 freshstate1 t in
-                    (cat_nfa n1 n2, freshstate2)
-  | Alt (r1,r2) ->  let (n1,freshstate1) = nfa_of_regexp r1 freshstate t in
-                    let (n2,freshstate2) = nfa_of_regexp r2 freshstate1 t in
-                    (alt_nfa n1 n2,freshstate2)
-  | Star r -> let (n,freshstate_star) = nfa_of_regexp r freshstate t in (star_nfa n t, freshstate_star)
+  | Eps ->
+      ( {
+          nfa_states = [ freshstate ];
+          nfa_initial = [ freshstate ];
+          nfa_final = [ (freshstate, t) ];
+          nfa_step = (fun q -> []);
+        },
+        freshstate + 1 )
+  | Charset c ->
+      ( {
+          nfa_states = [ freshstate; freshstate + 1 ];
+          nfa_initial = [ freshstate ];
+          nfa_final = [ (freshstate + 1, t) ];
+          nfa_step =
+            (fun q ->
+              if q = freshstate then [ (Some c, freshstate + 1) ] else []);
+        },
+        freshstate + 2 )
+  | Cat (r1, r2) ->
+      let n1, freshstate1 = nfa_of_regexp r1 freshstate t in
+      let n2, freshstate2 = nfa_of_regexp r2 freshstate1 t in
+      (cat_nfa n1 n2, freshstate2)
+  | Alt (r1, r2) ->
+      let n1, freshstate1 = nfa_of_regexp r1 freshstate t in
+      let n2, freshstate2 = nfa_of_regexp r2 freshstate1 t in
+      (alt_nfa n1 n2, freshstate2)
+  | Star r ->
+      let n, freshstate_star = nfa_of_regexp r freshstate t in
+      (star_nfa n t, freshstate_star)
 
 (* Deterministic Finite Automaton (DFA) *)
 
@@ -128,44 +142,41 @@ let rec nfa_of_regexp r freshstate t =
 
 type dfa_state = int set
 
-type dfa =
-  {
-    dfa_states: dfa_state list;
-    dfa_initial: dfa_state;
-    dfa_final: (dfa_state * (string -> token option)) list;
-    dfa_step: dfa_state -> char -> dfa_state option
-  }
+type dfa = {
+  dfa_states : dfa_state list;
+  dfa_initial : dfa_state;
+  dfa_final : (dfa_state * (string -> token option)) list;
+  dfa_step : dfa_state -> char -> dfa_state option;
+}
 
 (* On va maintenant déterminiser notre NFA pour en faire un DFA. *)
-
 
 (* [epsilon_closure] calcule la epsilon-fermeture d'un état [s] dans un NFA [n],
    c'est-à-dire l'ensemble des états accessibles depuis [s] en ne prenant que
    des epsilon-transitions. *)
-let epsilon_closure (n: nfa) (s: nfa_state) : nfa_state set =
+let epsilon_closure (n : nfa) (s : nfa_state) : nfa_state set =
   (* La fonction [traversal visited s] effectue un parcours de l'automate en
      partant de l'état [s], et en suivant uniquement les epsilon-transitions. *)
-  let rec traversal (visited: nfa_state set) (s: nfa_state) : nfa_state set =
-    if Set.mem s visited then visited 
+  let rec traversal (visited : nfa_state set) (s : nfa_state) : nfa_state set =
+    if Set.mem s visited then visited
     else
+      List.fold_left
+        (fun (acc : nfa_state set) (charset, q) ->
+          if charset = None then Set.union acc (traversal (Set.add s visited) q)
+          else acc)
+        (Set.add s visited) (n.nfa_step s)
+  in
 
-    List.fold_left (fun (acc: nfa_state set) (charset,q)-> 
-      if charset = None 
-      then Set.union acc (traversal (Set.add s visited) q)
-      else acc
-    ) (Set.add s visited) (n.nfa_step s)
-  
-  in 
   traversal Set.empty s
 
 (* [epsilon_closure_set n ls] calcule l'union des epsilon-fermeture de chacun
    des états du NFA [n] dans l'ensemble [ls]. *)
-let epsilon_closure_set (n: nfa) (ls: nfa_state set) : nfa_state set =
+let epsilon_closure_set (n : nfa) (ls : nfa_state set) : nfa_state set =
   Set.fold (fun s acc -> Set.union acc (epsilon_closure n s)) ls Set.empty
 
 (* [dfa_initial_state n] calcule l'état initial de l'automate déterminisé. *)
-let dfa_initial_state (n: nfa) : dfa_state =
-   epsilon_closure_set n (Set.of_list n.nfa_initial)
+let dfa_initial_state (n : nfa) : dfa_state =
+  epsilon_closure_set n (Set.of_list n.nfa_initial)
 
 (* Construction de la table de transitions de l'automate DFA. *)
 
@@ -194,39 +205,42 @@ let dfa_initial_state (n: nfa) : dfa_state =
 *)
 
 let assoc_throw_none (l : ('a option * 'b) list) : ('a * 'b) list =
-  List.filter_map (fun (o,n) ->
-      match o with
-        None -> None
-      | Some x -> Some (x,n)
-    ) l
+  List.filter_map
+    (fun (o, n) -> match o with None -> None | Some x -> Some (x, n))
+    l
 
 let assoc_distribute_key (l : ('a set * 'b) list) : ('a * 'b) list =
-  List.fold_left (fun (acc : ('a * 'b) list) (k, v) ->
-      Set.fold (fun c acc -> (c, v)::acc) k acc)
+  List.fold_left
+    (fun (acc : ('a * 'b) list) (k, v) ->
+      Set.fold (fun c acc -> (c, v) :: acc) k acc)
     [] l
 
 let assoc_merge_vals (l : ('a * 'b) list) : ('a * 'b set) list =
-  List.fold_left (fun (acc : ('a * 'b set) list) (k, v) ->
+  List.fold_left
+    (fun (acc : ('a * 'b set) list) (k, v) ->
       match List.assoc_opt k acc with
-      | None -> (k, Set.singleton v)::acc
-      | Some vl -> (k, Set.add v vl)::List.remove_assoc k acc
-    ) [] l
+      | None -> (k, Set.singleton v) :: acc
+      | Some vl -> (k, Set.add v vl) :: List.remove_assoc k acc)
+    [] l
 
-let rec build_dfa_table 
-    (table: (dfa_state, (char * dfa_state) list) Hashtbl.t)
-    (n: nfa)
-    (ds: dfa_state) : unit =
+let rec build_dfa_table (table : (dfa_state, (char * dfa_state) list) Hashtbl.t)
+    (n : nfa) (ds : dfa_state) : unit =
   match Hashtbl.find_option table ds with
   | Some _ -> ()
   | None ->
-    (* [transitions] contient les transitions du DFA construites
-     * à partir des transitions du NFA comme décrit auparavant *)
-    let transitions : (char * dfa_state) list =
-        let t = Set.fold (fun (ns : nfa_state) acc -> (n.nfa_step ns) @ acc) ds [] in 
-        let merged =  assoc_merge_vals (assoc_distribute_key (assoc_throw_none t)) 
-      in List.map (fun (c,q) -> (c, epsilon_closure_set n q)) merged in
-    Hashtbl.replace table ds transitions;
-    List.iter (build_dfa_table table n) (List.map snd transitions)
+      (* [transitions] contient les transitions du DFA construites
+       * à partir des transitions du NFA comme décrit auparavant *)
+      let transitions : (char * dfa_state) list =
+        let t =
+          Set.fold (fun (ns : nfa_state) acc -> n.nfa_step ns @ acc) ds []
+        in
+        let merged =
+          assoc_merge_vals (assoc_distribute_key (assoc_throw_none t))
+        in
+        List.map (fun (c, q) -> (c, epsilon_closure_set n q)) merged
+      in
+      Hashtbl.replace table ds transitions;
+      List.iter (build_dfa_table table n) (List.map snd transitions)
 
 (* Calcul des états finaux de l'automate DFA *)
 
@@ -246,59 +260,58 @@ let rec build_dfa_table
    Pour résoudre ce problème plus généralement, on introduit une fonction de
    priorité pour départager les tokens. La fonction [priority : token -> int]
    donne une valeur plus petite aux tokens les plus prioritaires.
-
 *)
 
-let priority t =
-  match t with
-  | SYM_EOF -> 100
-  | SYM_IDENTIFIER _ -> 50
-  | _ -> 0
+let priority t = match t with SYM_EOF -> 100 | SYM_IDENTIFIER _ -> 50 | _ -> 0
 
 (* [min_priority l] renvoie le token de [l] qui a la plus petite priorité, ou
    [None] si la liste [l] est vide. *)
-let min_priority (l: token list) : token option =
-   match l with
-   | [] -> None
-   | t::q -> List.fold (fun min t' -> if (priority t' < priority t) then Some t' else min) (Some t) q 
-   
+let min_priority (l : token list) : token option =
+      List.fold
+        (fun mininimum t -> match mininimum with 
+          | None -> Some t 
+          | Some t' -> if priority t' < priority t then Some t' else Some t)
+        (None) l
 
 (* [dfa_final_states n dfa_states] renvoie la liste des états finaux du DFA,
    accompagnés du token qu'ils reconnaissent. *)
-let dfa_final_states (n: nfa) (dfa_states: dfa_state list) :
-  (dfa_state * (string -> token option)) list  =
-  List.filter_map (fun dfas ->
-    let nfa_finals = List.filter (fun q -> List.mem_assoc q n.nfa_final) (Set.to_list dfas) in
-    match nfa_finals with
-    | [] -> None
-    | _ -> let tokens = List.filter_map (fun q -> List.assoc_opt q n.nfa_final) nfa_finals in
-      Some (dfas, fun s -> min_priority (List.filter_map (fun f -> f s) tokens))
-    ) dfa_states
+let dfa_final_states (n : nfa) (dfa_states : dfa_state list) :
+    (dfa_state * (string -> token option)) list =
+  List.filter_map
+    (fun dfas ->
+      let nfa_finals =
+        List.filter (fun q -> List.mem_assoc q n.nfa_final) (Set.to_list dfas)
+      in
+      match nfa_finals with
+      | [] -> None
+      | _ ->
+          let tokens =
+            List.filter_map (fun q -> List.assoc_opt q n.nfa_final) nfa_finals
+          in
+          Some
+            (dfas, fun s -> min_priority (List.filter_map (fun f -> f s) tokens)))
+    dfa_states
 
 (* Construction de la relation de transition du DFA. *)
 
 (* [make_dfa_step table] construit la fonction de transition du DFA, où [table]
    est la table générée par [build_dfa_table], définie ci-dessus. *)
-let make_dfa_step (table: (dfa_state, (char * dfa_state) list) Hashtbl.t) =
-  fun (q: dfa_state) (a: char) -> 
-    List.assoc_opt a (Hashtbl.find table q)
+let make_dfa_step (table : (dfa_state, (char * dfa_state) list) Hashtbl.t)
+    (q : dfa_state) (a : char) =
+  List.assoc_opt a (Hashtbl.find table q)
 
 (* Finalement, on assemble tous ces morceaux pour construire l'automate. La
    fonction [dfa_of_nfa n] vous est grâcieusement offerte. *)
-let dfa_of_nfa (n: nfa) : dfa =
+let dfa_of_nfa (n : nfa) : dfa =
   let table : (dfa_state, (char * dfa_state) list) Hashtbl.t =
-    Hashtbl.create (List.length n.nfa_states) in
+    Hashtbl.create (List.length n.nfa_states)
+  in
   let dfa_initial = dfa_initial_state n in
   build_dfa_table table n dfa_initial;
   let dfa_states = Hashtbl.keys table |> List.of_enum in
   let dfa_final = dfa_final_states n dfa_states in
   let dfa_step = make_dfa_step table in
-  {
-    dfa_states  ;
-    dfa_initial ;
-    dfa_final   ;
-    dfa_step    ;
-  }
+  { dfa_states; dfa_initial; dfa_final; dfa_step }
 
 (* Analyse lexicale *)
 
@@ -316,13 +329,9 @@ let dfa_of_nfa (n: nfa) : dfa =
      commentaires)
    - [LRerror] indique que l'automate n'a rien reconnu du tout : il s'agit donc
      d'une erreur.
-
 *)
 
-type lexer_result =
-  | LRtoken of token
-  | LRskip
-  | LRerror
+type lexer_result = LRtoken of token | LRskip | LRerror
 
 (* La fonction [tokenize_one] utilise une fonction interne [recognize q w
    current_word last_accepted] qui essaie de lire le plus grand préfixe de [w]
@@ -341,157 +350,204 @@ type lexer_result =
    DFA, le programme à analyser [w], un mot courant vide, et un dernier état
    accepté dénotant une erreur (si on ne passe par aucun état final, il s'agit
    bien d'une erreur lexicale).
-
 *)
 
-let tokenize_one (d : dfa) (w: char list) : lexer_result * char list =
-  let rec recognize (q: dfa_state) (w: char list)
-      (current_token: char list) (last_accepted: lexer_result * char list)
-    : lexer_result * char list =
-         (* TODO *)
-         last_accepted
+let tokenize_one (d : dfa) (w : char list) : lexer_result * char list =
+  let rec recognize (q : dfa_state) (w : char list) (current_token : char list)
+      (last_accepted : lexer_result * char list) : lexer_result * char list =
+    let last_accepted_updated =
+      let current_string = string_of_char_list current_token in 
+        match List.assoc_opt q d.dfa_final with
+        | None -> last_accepted
+        | Some fun_lexer -> (
+            match fun_lexer current_string with
+            | None -> (LRskip, w)
+            | Some t -> (LRtoken t, w)) 
+    in
+    match w with
+    | [] -> last_accepted_updated
+    | h :: tl -> (
+        match d.dfa_step q h with
+        | None -> last_accepted_updated
+        | Some q' ->
+            recognize q' tl (current_token @ [ h ]) last_accepted_updated)
   in
   recognize d.dfa_initial w [] (LRerror, w)
 
 (* La fonction [tokenize_all d w] répète l'application de [tokenize_one] tant qu'on
    n'est pas arrivé à la fin du fichier (token [SYM_EOF]). Encore une fois,
    cette fonction vous est offerte. *)
-let rec tokenize_all (d: dfa) (w: char list) : (token list * char list) =
+let rec tokenize_all (d : dfa) (w : char list) : token list * char list =
   match tokenize_one d w with
-  | LRerror, w -> [], w
+  | LRerror, w -> ([], w)
   | LRskip, w -> tokenize_all d w
   | LRtoken token, w ->
-    let (tokens, w) =
-      if token = SYM_EOF
-      then ([], w)
-      else tokenize_all d w in
-    (token :: tokens, w)
-
-
+      let tokens, w = if token = SYM_EOF then ([], w) else tokenize_all d w in
+      (token :: tokens, w)
 
 (* Fonctions d'affichage - Utile pour déboguer *)
 
-
 let char_list_to_char_ranges s =
-  let rec recognize_range (cl: int list) l opt_c n =
+  let rec recognize_range (cl : int list) l opt_c n =
     match cl with
-    | [] -> (match opt_c with
-          None -> l
-        | Some c -> (c,n)::l
-      )
-    | c::r -> (match opt_c with
+    | [] -> ( match opt_c with None -> l | Some c -> (c, n) :: l)
+    | c :: r -> (
+        match opt_c with
         | None -> recognize_range r l (Some c) 0
         | Some c' ->
-          if c' + n + 1 = c
-          then recognize_range r l (Some c') (n + 1)
-          else recognize_range r ((c',n)::l) (Some c) 0
-      )
+            if c' + n + 1 = c then recognize_range r l (Some c') (n + 1)
+            else recognize_range r ((c', n) :: l) (Some c) 0)
   in
-  let l = recognize_range (List.sort Stdlib.compare (List.map Char.code s)) [] None 0 in
+  let l =
+    recognize_range (List.sort Stdlib.compare (List.map Char.code s)) [] None 0
+  in
   let escape_char c =
     if c = '"' then "\\\""
     else if c = '\\' then "\\\\"
     else if c = '\x00' then "\\\\0"
     else if c = '\t' then "\\\\t"
     else if c = '\n' then "\\\\n"
-    else Printf.sprintf "%c" c in
-  List.fold_left (fun acc (c,n) ->
+    else Printf.sprintf "%c" c
+  in
+  List.fold_left
+    (fun acc (c, n) ->
       match n with
       | 0 -> Printf.sprintf "%s%s" (escape_char (Char.chr c)) acc
-      | 1 -> Printf.sprintf "%s%s%s" (escape_char (Char.chr c)) (c + 1 |> Char.chr |> escape_char) acc
-      | _ -> Printf.sprintf "%s-%s%s" (escape_char (Char.chr c))
-          (escape_char (Char.chr (c + n))) acc
-    ) "" l
-
+      | 1 ->
+          Printf.sprintf "%s%s%s"
+            (escape_char (Char.chr c))
+            (c + 1 |> Char.chr |> escape_char)
+            acc
+      | _ ->
+          Printf.sprintf "%s-%s%s"
+            (escape_char (Char.chr c))
+            (escape_char (Char.chr (c + n)))
+            acc)
+    "" l
 
 (* Affichage d'un NFA *)
 let nfa_to_string (n : nfa) : string =
-  Printf.sprintf "===== NFA\nStates : %s\nInitial states : %s\nFinal states : %s\n%s"
+  Printf.sprintf
+    "===== NFA\nStates : %s\nInitial states : %s\nFinal states : %s\n%s"
     (String.concat " " (List.map (fun q -> string_of_int q) n.nfa_states))
     (String.concat " " (List.map (fun q -> string_of_int q) n.nfa_initial))
-    (String.concat " " (List.map (fun (q,_) -> string_of_int q) n.nfa_final)) 
+    (String.concat " " (List.map (fun (q, _) -> string_of_int q) n.nfa_final))
     (String.concat ""
-       (List.map (fun q ->
+       (List.map
+          (fun q ->
             let l = n.nfa_step q in
             String.concat ""
-              (List.map (fun (oa, q') ->
-                   Printf.sprintf "step(%d, %s) = [%d]\n" q (match oa with Some a -> Printf.sprintf "[%s]" (string_of_char_set a) | _ -> "eps")
-                     q'
-                 ) l)
-          ) n.nfa_states))
+              (List.map
+                 (fun (oa, q') ->
+                   Printf.sprintf "step(%d, %s) = [%d]\n" q
+                     (match oa with
+                     | Some a -> Printf.sprintf "[%s]" (string_of_char_set a)
+                     | _ -> "eps")
+                     q')
+                 l))
+          n.nfa_states))
 
 let nfa_to_dot oc (n : nfa) : unit =
   Printf.fprintf oc "digraph {\n";
-  List.iter (fun n -> Printf.fprintf oc "N%d [shape=\"house\" color=\"red\"]\n" n) (n.nfa_initial);
-  List.iter (fun (q,t) ->
-      Printf.fprintf oc "N%d [shape=\"rectangle\", label=\"%s\"]\n"
-        q (match t "0" with | Some s -> string_of_symbol s | None -> "" )) n.nfa_final;
-  List.iter (fun q ->
-      List.iter (fun (cso, q') ->
+  List.iter
+    (fun n -> Printf.fprintf oc "N%d [shape=\"house\" color=\"red\"]\n" n)
+    n.nfa_initial;
+  List.iter
+    (fun (q, t) ->
+      Printf.fprintf oc "N%d [shape=\"rectangle\", label=\"%s\"]\n" q
+        (match t "0" with Some s -> string_of_symbol s | None -> ""))
+    n.nfa_final;
+  List.iter
+    (fun q ->
+      List.iter
+        (fun (cso, q') ->
           match cso with
-          | None ->
-            Printf.fprintf oc "N%d -> N%d [label=\"[epsilon]\"]\n" q q'
+          | None -> Printf.fprintf oc "N%d -> N%d [label=\"[epsilon]\"]\n" q q'
           | Some cs ->
-            Printf.fprintf oc "N%d -> N%d [label=\"[%s]\"]\n" q q' (char_list_to_char_ranges (Set.to_list cs))
-        ) (n.nfa_step q);
-    ) n.nfa_states;
+              Printf.fprintf oc "N%d -> N%d [label=\"[%s]\"]\n" q q'
+                (char_list_to_char_ranges (Set.to_list cs)))
+        (n.nfa_step q))
+    n.nfa_states;
   Printf.fprintf oc "}\n"
 
-
 (* Affichage d'un DFA *)
-let dfa_to_string (n : dfa) (alphabet: char list): string =
-  Printf.sprintf "===== DFA\nStates : %s\nInitial state : %s\nFinal states : [%s]\n%s"
+let dfa_to_string (n : dfa) (alphabet : char list) : string =
+  Printf.sprintf
+    "===== DFA\nStates : %s\nInitial state : %s\nFinal states : [%s]\n%s"
     (String.concat " " (List.map (fun q -> string_of_int_set q) n.dfa_states))
     (string_of_int_set n.dfa_initial)
-    (String.concat " " (List.map (fun (q,_) -> string_of_int_set q) n.dfa_final))
-    (String.concat "" (List.map (fun q ->
-         String.concat "" (List.map (fun a ->
-             let l = n.dfa_step q a in
-             match l with
-             | None -> ""
-             | Some q' ->
-               if not (Set.is_empty q') then
-                 Printf.sprintf "step(%s, %c) = %s\n"
-                   (string_of_int_set q)
-                   a (string_of_int_set q')
-               else ""
-           ) alphabet);
-       ) n.dfa_states))
+    (String.concat " "
+       (List.map (fun (q, _) -> string_of_int_set q) n.dfa_final))
+    (String.concat ""
+       (List.map
+          (fun q ->
+            String.concat ""
+              (List.map
+                 (fun a ->
+                   let l = n.dfa_step q a in
+                   match l with
+                   | None -> ""
+                   | Some q' ->
+                       if not (Set.is_empty q') then
+                         Printf.sprintf "step(%s, %c) = %s\n"
+                           (string_of_int_set q) a (string_of_int_set q')
+                       else "")
+                 alphabet))
+          n.dfa_states))
 
 (* Affichage graphique d'un DFA. Génère un fichier .dot que vous pouvez ensuite
    convertir en pdf avec la commande 'dot fichier.dot -Tsvg -o fichier.svg' ou
    bien en copiant le code DOT dans un convertisseur en ligne (par exemple :
    http://proto.informatics.jax.org/prototypes/dot2svg/). *)
 
-let dfa_to_dot oc (n : dfa) (cl: char list): unit =
+let dfa_to_dot oc (n : dfa) (cl : char list) : unit =
   Printf.fprintf oc "digraph {\n";
-  Printf.fprintf oc "N%s [shape=\"house\" color=\"red\"]\n" (string_of_int_set n.dfa_initial);
-  List.iter (fun (q,t) ->
+  Printf.fprintf oc "N%s [shape=\"house\" color=\"red\"]\n"
+    (string_of_int_set n.dfa_initial);
+  List.iter
+    (fun (q, t) ->
       Printf.fprintf oc "N%s [shape=\"rectangle\", label=\"%s\"]\n"
-        (string_of_int_set q) (match t "0" with | Some s -> string_of_symbol s | None -> "" )) n.dfa_final;
-  List.iter (fun q ->
-      let l = List.fold_left (fun l a ->
-          match n.dfa_step q a with
-            None -> l
-          | Some q' ->
-            match List.assoc_opt q' l with
-            | None -> (q', [a])::l
-            | Some ql -> (q', a::ql)::List.remove_assoc q' l
-        ) [] cl in
-      List.iter (fun (q', cl) ->
+        (string_of_int_set q)
+        (match t "0" with Some s -> string_of_symbol s | None -> ""))
+    n.dfa_final;
+  List.iter
+    (fun q ->
+      let l =
+        List.fold_left
+          (fun l a ->
+            match n.dfa_step q a with
+            | None -> l
+            | Some q' -> (
+                match List.assoc_opt q' l with
+                | None -> (q', [ a ]) :: l
+                | Some ql -> (q', a :: ql) :: List.remove_assoc q' l))
+          [] cl
+      in
+      List.iter
+        (fun (q', cl) ->
           Printf.fprintf oc "N%s -> N%s [label=\"[%s]\"]\n"
-            (string_of_int_set q)
-            (string_of_int_set q') (char_list_to_char_ranges cl)
-        ) l;
-    ) n.dfa_states;
+            (string_of_int_set q) (string_of_int_set q')
+            (char_list_to_char_ranges cl))
+        l)
+    n.dfa_states;
   Printf.fprintf oc "}\n"
 
 let nfa_of_list_regexp l =
-  let (n, fs) = List.fold_left (fun (nfa, fs) (r,t) ->
-      let n,fs = nfa_of_regexp r fs t in
-      (alt_nfa nfa n, fs)
-    ) ({ nfa_states = []; nfa_initial = []; nfa_final = []; nfa_step = fun _ -> [] },1)
-      l in n
+  let n, fs =
+    List.fold_left
+      (fun (nfa, fs) (r, t) ->
+        let n, fs = nfa_of_regexp r fs t in
+        (alt_nfa nfa n, fs))
+      ( {
+          nfa_states = [];
+          nfa_initial = [];
+          nfa_final = [];
+          nfa_step = (fun _ -> []);
+        },
+        1 )
+      l
+  in
+  n
 
 let dfa_of_list_regexp l =
   let n = nfa_of_list_regexp l in
@@ -500,23 +556,25 @@ let dfa_of_list_regexp l =
 let tokenize_list_regexp l s =
   let d = dfa_of_list_regexp l in
   let tokens, leftover = tokenize_all d (char_list_of_string s) in
-  if leftover <> []
-  then Error (Printf.sprintf "Lexer failed to recognize string starting with '%s'\n"
-                   (string_of_char_list (take 20 leftover))
-                )
+  if leftover <> [] then
+    Error
+      (Printf.sprintf "Lexer failed to recognize string starting with '%s'\n"
+         (string_of_char_list (take 20 leftover)))
   else OK tokens
 
 let file_contents file =
   let ic = open_in file in
   let rec aux s () =
     try
-      let line = input_line ic in  (* read line from in_channel and discard \n *)
-      aux (s ^ line ^ "\n") ()   (* close the input channel *)
-    with e ->                      (* some unexpected exception occurs *)
-      close_in_noerr ic;           (* emergency closing *)
-      s in
+      let line = input_line ic in
+      (* read line from in_channel and discard \n *)
+      aux (s ^ line ^ "\n") () (* close the input channel *)
+    with e ->
+      (* some unexpected exception occurs *)
+      close_in_noerr ic;
+      (* emergency closing *)
+      s
+  in
   aux "" ()
 
-
-let tokenize_file f =
-  tokenize_list_regexp list_regexp (file_contents f)
+let tokenize_file f = tokenize_list_regexp list_regexp (file_contents f)
