@@ -68,6 +68,7 @@ let rec make_einstr_of_ast (a: tree) : instr res =
     |Node(Tblock,list_tree) -> list_map_res make_einstr_of_ast list_tree >>= fun i -> OK (Iblock i)
     |Node(Treturn,[tr]) -> make_eexpr_of_ast tr >>= fun e -> OK (Ireturn e)
     |Node(Tprint,[tr]) -> make_eexpr_of_ast tr >>= fun e -> OK (Iprint e)
+    |NullLeaf -> OK (Iblock [])
     | _ -> Error (Printf.sprintf "Unacceptable ast in make_einstr_of_ast %s"
                     (string_of_ast a))
   in

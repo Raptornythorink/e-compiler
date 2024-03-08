@@ -9,17 +9,33 @@ let binop_bool_to_int f x y = if f x y then 1 else 0
    et [y]. *)
 let eval_binop (b: binop) : int -> int -> int =
   match b with
-   | _ -> fun x y -> 0
+   | Eadd -> fun x y -> x + y
+   | Emul -> fun x y -> x * y
+   | Emod -> fun x y -> x mod y
+   | Exor -> fun x y -> x + y
+   | Ediv -> fun x y -> x / y
+   | Esub -> fun x y -> x - y
+   | Eclt -> fun x y -> Bool.to_int (x < y) 
+   | Ecle -> fun x y -> Bool.to_int (x <= y)
+   | Ecgt -> fun x y -> Bool.to_int (x > y)
+   | Ecge -> fun x y -> Bool.to_int (x >= y)
+   | Eceq -> fun x y -> Bool.to_int (x == y)
+   | Ecne -> fun x y -> Bool.to_int (x != y)
+
 
 (* [eval_unop u x] évalue l'opération unaire [u] sur l'argument [x]. *)
-let eval_unop (u: unop) : int -> int =
-  match u with
-   | _ -> fun x -> 0
+let eval_unop (u: unop) : int -> int = fun x -> -x
 
 (* [eval_eexpr st e] évalue l'expression [e] dans l'état [st]. Renvoie une
    erreur si besoin. *)
 let rec eval_eexpr st (e : expr) : int res =
-   Error "eval_eexpr not implemented yet."
+   match e with
+   | Ebinop (bin_op, e1, e2) -> eval_eexpr st e1 >>= fun res1 ->  eval_eexpr st e2 >>= fun res2 -> OK(eval_binop bin_op res1 res2)
+   | Eunop (un_op, e) -> eval_eexpr st e >>= fun resultat -> OK(eval_unop un_op resultat)
+   | Eint n -> OK n
+   | Evar s -> match get_val st.env s with
+         |Some res -> OK res
+         |None -> Error (Format.sprintf"Unknown variable %s\n" s)
 
 (* [eval_einstr oc st ins] évalue l'instrution [ins] en partant de l'état [st].
 
@@ -33,9 +49,28 @@ let rec eval_eexpr st (e : expr) : int res =
    lieu et que l'exécution doit continuer.
 
    - [st'] est l'état mis à jour. *)
+
 let rec eval_einstr oc (st: int state) (ins: instr) :
-  (int option * int state) res =
-   Error "eval_einstr not implemented yet."
+(int option * int state) res = match ins with
+   | Iassign (s, e) -> 
+      eval_eexpr st e >>= fun res -> 
+         set_val st.env s res ; 
+         OK (None,st)
+   | Iif (expr_cond, if_instr, else_instr) -> 
+      eval_eexpr st expr_cond >>= fun res -> 
+         if res<>0 then eval_einstr oc st if_instr 
+         else eval_einstr oc st else_instr
+   | Iwhile (cond_expr, while_instr) -> 
+      eval_eexpr st cond_expr >>= fun res -> 
+         if (res<>0) then 
+            eval_einstr oc st while_instr >>= fun (ret, st') -> 
+               match ret with 
+               |Some v -> OK (Some v, st')
+               |None -> eval_einstr oc st' ins
+      else OK (None,st)
+   | Iblock (instr_list) -> List.fold_left (fun acc i -> acc >>= fun (_, st) -> eval_einstr oc st i) (OK (None, st)) instr_list
+   | Ireturn (e) -> eval_eexpr st e >>= fun res -> OK (Some res, st)
+   | Iprint (e) -> eval_eexpr st e >>= fun res -> Format.fprintf oc "%d\n" res ; OK (None, st)
 
 (* [eval_efun oc st f fname vargs] évalue la fonction [f] (dont le nom est
    [fname]) en partant de l'état [st], avec les arguments [vargs].
