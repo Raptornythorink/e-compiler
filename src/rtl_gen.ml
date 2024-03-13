@@ -42,8 +42,17 @@ let find_var (next_reg, var2reg) v =
    - [next_reg] est le nouveau premier registre disponible
    - [var2reg] est la nouvelle association nom de variable/registre.
 *)
-let rec rtl_instrs_of_cfg_expr (next_reg, var2reg) (e: expr) =
-   (next_reg, [], next_reg, var2reg)
+let rec rtl_instrs_of_cfg_expr (next_reg, var2reg) (e: expr) = match e with
+   | Ebinop (binop, e1, e2) -> 
+      let (r1, l1, next_reg1, var2reg1) = rtl_instrs_of_cfg_expr (next_reg, var2reg) e1 in
+      let (r2, l2, next_reg2, var2reg2) = rtl_instrs_of_cfg_expr (next_reg1, var2reg1) e2 in
+      (next_reg2, l1@l2@[Rbinop(binop, next_reg2, r1, r2)], next_reg2 + 1, var2reg2)
+   | Eunop (unop, e) -> let (r, l, next_reg', var2reg') = rtl_instrs_of_cfg_expr (next_reg, var2reg) e in
+      (next_reg', l@[Runop(unop, next_reg', r)], next_reg'+1, var2reg')
+   | Eint i -> (next_reg, [Rconst (next_reg,i)], next_reg + 1, var2reg)
+   | Evar s -> let (r, next_reg', var2reg') = find_var (next_reg, var2reg) s in
+               (r, [], next_reg', var2reg')
+   
 
 let is_cmp_op =
   function Eclt -> Some Rclt
@@ -63,9 +72,20 @@ let rtl_cmp_of_cfg_expr (e: expr) =
   | _ -> (Rcne, e, Eint 0)
 
 
-let rtl_instrs_of_cfg_node ((next_reg:int), (var2reg: (string*int) list)) (c: cfg_node) =
-   (* TODO *)
-   ([], next_reg, var2reg)
+let rtl_instrs_of_cfg_node (next_reg, var2reg) (c: cfg_node) = match c with
+  | Cassign (s, e, label) -> let (r,l, next_reg_e, var2reg_e) = rtl_instrs_of_cfg_expr (next_reg, var2reg) e in
+                          let (r_s, next_reg_s, var2reg_s) = find_var (next_reg_e, var2reg_e) s in
+                         (l@[Rmov (r_s, r);Rjmp label], next_reg_s, var2reg_s)
+  | Creturn e -> let (r,l, next_reg', var2reg') = rtl_instrs_of_cfg_expr (next_reg, var2reg) e in 
+                (l@[Rret r], next_reg', var2reg')
+  | Cprint (e, label) -> let (r,l, next_reg', var2reg') = rtl_instrs_of_cfg_expr (next_reg, var2reg) e in 
+                      (l@[Rprint r ; Rjmp label], next_reg', var2reg')
+  | Ccmp (e, label1, label2) -> let (rtl_cmp, e1, e2) = rtl_cmp_of_cfg_expr e in 
+      let (r1, l1, next_reg1, var2reg1) = rtl_instrs_of_cfg_expr (next_reg, var2reg) e1 in
+      let (r2, l2, next_reg2, var2reg2) = rtl_instrs_of_cfg_expr (next_reg1, var2reg1) e2 in
+      (l1@l2@[Rbranch (rtl_cmp, r1, r2, label1); Rjmp label2], next_reg2, var2reg2) 
+  | Cnop label -> ([Rjmp label], next_reg, var2reg)
+   
 
 let rtl_instrs_of_cfg_fun cfgfunname ({ cfgfunargs; cfgfunbody; cfgentry }: cfg_fun) =
   let (rargs, next_reg, var2reg) =
