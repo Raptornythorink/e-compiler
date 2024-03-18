@@ -215,19 +215,19 @@ let written_rtl_regs_instr (i: rtl_instr) =
   | Rbinop (_, rd, _, _)
   | Runop (_, rd, _)
   | Rconst (rd, _)
+  | Rcall( Some rd, _, _)
   | Rmov (rd, _) -> Set.singleton rd
-  | Rprint _
   | Rret _
   | Rlabel _
   | Rbranch (_, _, _, _)
+  | Rcall(None, _, _)
   | Rjmp _ -> Set.empty
 
 let read_rtl_regs_instr (i: rtl_instr) =
   match i with
   | Rbinop (_, _, rs1, rs2)
   | Rbranch (_, rs1, rs2, _) -> Set.of_list [rs1; rs2]
-
-  | Rprint rs
+  | Rcall(_, _, rargs) -> Set.of_list rargs
   | Runop (_, _, rs)
   | Rmov (_, rs)
   | Rret rs -> Set.singleton rs
@@ -301,28 +301,56 @@ let ltl_instrs_of_linear_instr fname live_out allocation
     load_loc reg_tmp1 allocation rs >>= fun (ls, rs) ->
     store_loc reg_tmp1 allocation rd >>= fun (ld, rd) ->
     OK (ls @ LMov(rd, rs) :: ld)
-  | Rprint r ->
-    let (save_a_regs, arg_saved, ofs) =
-      save_caller_save
-        (range 32)
-        (- (numspilled+1)) in
-    let parameter_passing =
-      match Hashtbl.find_option allocation r with
-      | None -> Error (Format.sprintf "Could not find allocation for register %d\n" r)
-      | Some (Reg rs) -> OK [LMov(reg_a0, rs)]
-      | Some (Stk o) -> OK [LLoad(reg_a0, reg_fp, (Archi.wordsize ()) * o, (archi_mas ()))]
-    in
-    parameter_passing >>= fun parameter_passing ->
-    OK (LComment "Saving a0-a7,t0-t6" :: save_a_regs @
-        LAddi(reg_sp, reg_s0, (Archi.wordsize ()) * (ofs + 1)) ::
-        parameter_passing @
-        LCall "print" ::
-        LComment "Restoring a0-a7,t0-t6" :: restore_caller_save arg_saved)
-
   | Rret r ->
     load_loc reg_tmp1 allocation r >>= fun (l,r) ->
     OK (l @ [LMov (reg_ret, r) ; LJmp epilogue_label])
   | Rlabel l -> OK [LLabel (Format.sprintf "%s_%d" fname l)]
+  | Rcall(None, f, rargs) ->
+      caller_save live_out allocation rargs >>= fun caller_saved ->
+      let (save_regs_instructions, args_saved, ofs) = save_caller_save (Set.to_list caller_saved) (- (numspilled+1)) in
+      pass_parameters rargs allocation args_saved >>= fun (parameter_passing_instructions, npush) ->
+        OK(
+          LComment "Saving caller-saved" ::
+          save_regs_instructions @
+          LComment "Moving stack pointer" ::
+          LAddi(reg_sp, reg_s0, (Archi.wordsize ()) * ofs) ::
+          LComment "Passing parameters" ::
+          parameter_passing_instructions @
+          LComment "Calling function" ::
+          LCall(f) ::
+          ( if npush > 0 then
+            LComment "Popping stack" ::
+            LSubi(reg_sp, reg_sp, (Archi.wordsize ()) * npush) :: []
+          else []
+          ) @
+          LComment "Restoring caller-saved" ::
+          restore_caller_save args_saved
+       )
+  | Rcall(Some(rd), f, rargs) ->
+      caller_save live_out allocation rargs >>= fun caller_saved ->
+      let (save_regs_instructions, args_saved, ofs) = save_caller_save (Set.to_list caller_saved) (- (numspilled+1)) in
+      pass_parameters rargs allocation args_saved >>= fun (parameter_passing_instructions, npush) ->
+      store_loc reg_tmp1 allocation rd >>= fun (store_loc_instructions, rd) ->
+      let restore_caller_save_instructions = restore_caller_save (List.remove_assoc rd args_saved) in
+        OK(
+          LComment "Saving caller-saved" ::
+          save_regs_instructions @
+          LComment "Moving stack pointer" ::
+          LAddi(reg_sp, reg_s0, (Archi.wordsize ()) * ofs) ::
+          LComment "Passing parameters" ::
+          parameter_passing_instructions @
+          LComment "Calling function" ::
+          LCall(f) ::
+          ( if npush > 0 then
+              LComment "Popping stack" ::
+              LSubi(reg_sp, reg_sp, (Archi.wordsize ()) * npush) :: []
+            else []
+          ) @
+          LComment "Storing return value" ::
+          store_loc_instructions @ LMov(rd, reg_a0) ::
+          LComment "Restoring caller-saved" ::
+          restore_caller_save_instructions
+      )
   in
   res >>= fun l ->
   OK (LComment (Format.asprintf "#<span style=\"background: pink;\"><b>Linear instr</b>: %a #</span>" (Rtl_print.dump_rtl_instr fname (None, None) ~endl:"") ins)::l)

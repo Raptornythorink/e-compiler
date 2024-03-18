@@ -69,14 +69,34 @@ let rec exec_rtl_instr oc rp rtlfunname f st (i: rtl_instr) =
       | Some s -> OK (Some s, st)
       | _ -> Error (Printf.sprintf "Ret on undefined register (%s)" (print_reg r))
     end
-  | Rprint r ->
-    begin match Hashtbl.find_option st.regs r with
-      | Some s ->
-        Format.fprintf oc "%d\n" s;
-        OK (None, st)
-      | _ -> Error (Printf.sprintf "Print on undefined register (%s)" (print_reg r))
-    end
   | Rlabel n -> OK (None, st)
+  | Rcall(ord, fname, rargs) ->
+    let rargs_values_result = List.fold_left (fun acc key ->
+      match acc with
+      | Error _ -> acc
+      | OK param_values ->
+        match Hashtbl.find_option st.regs key with
+        | Some value -> OK (value :: param_values)
+        | None -> Error (Printf.sprintf "Undefined register (%s)" (print_reg key))
+    ) (OK []) rargs in
+    match rargs_values_result with
+    | Error(e) -> Error e
+    | OK(rargs_values) ->
+      match find_function rp fname with
+      | OK(f) ->
+        exec_rtl_fun oc rp st fname f (List.rev rargs_values) >>= fun (v, st) -> (
+          match ord, v with
+          | None, _ -> OK (None, st)
+          | Some rd, Some v -> Hashtbl.replace st.regs rd v; OK (None, st)
+          | Some _, None -> Error (Format.sprintf "RTL: Call to function %s without return value" fname)
+        )
+      | Error(_) ->
+        do_builtin oc st.mem fname rargs_values >>= fun v -> (
+          match ord, v with
+          | None, _ -> OK (None, st)
+          | Some rd, Some v -> Hashtbl.replace st.regs rd v; OK (None, st)
+          | Some _, None -> Error (Format.sprintf "RTL: Call to function %s without return value" fname)
+        )
 
 and exec_rtl_instr_at oc rp rtlfunname ({ rtlfunbody;  } as f: rtl_fun) st i =
   match Hashtbl.find_option rtlfunbody i with
@@ -109,7 +129,7 @@ and exec_rtl_fun oc rp st rtlfunname f params =
       let regs_save = Hashtbl.copy st.regs in
       let st' = {st with regs = regs'; } in
       exec_rtl_instrs oc rp rtlfunname f st' l >>= fun (v, st) ->
-      OK(v, {st with regs = regs_save })
+        OK(v, {st with regs = regs_save })
 
 and exec_rtl_prog oc rp memsize params =
   let st = init_state memsize in
@@ -118,5 +138,3 @@ and exec_rtl_prog oc rp memsize params =
   let params = take n params in
   exec_rtl_fun oc rp st "main" f params >>= fun (v, st) ->
   OK v
-
-
