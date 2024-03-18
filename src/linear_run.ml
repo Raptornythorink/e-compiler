@@ -47,19 +47,39 @@ let rec exec_linear_instr oc lp fname f st (i: rtl_instr) =
       OK (None, st)
     | _ -> Error (Printf.sprintf "Mov on undefined register (%s)" (print_reg rs))
     end
-  | Rprint r ->
-    begin match Hashtbl.find_option st.regs r with
-      | Some s ->
-        Format.fprintf oc "%d\n" s;
-        OK (None, st)
-      | _ -> Error (Printf.sprintf "Print on undefined register (%s)" (print_reg r))
-    end
   | Rret r ->
     begin match Hashtbl.find_option st.regs r with
       | Some s -> OK (Some s, st)
       | _ -> Error (Printf.sprintf "Ret on undefined register (%s)" (print_reg r))
     end
   | Rlabel n -> OK (None, st)
+  | Rcall(ord, fname, largs) ->
+      let largs_values_result = List.fold_left (fun acc key ->
+        match acc with
+        | Error _ -> acc
+        | OK param_values ->
+          match Hashtbl.find_option st.regs key with
+          | Some value -> OK (value :: param_values)
+          | None -> Error (Printf.sprintf "Undefined register (%s)" (print_reg key))
+      ) (OK []) largs in
+      match largs_values_result with
+      | Error(e) -> Error e
+      | OK(largs_values) ->
+        match find_function lp fname with
+        | OK(f) ->
+          exec_linear_fun oc lp st fname f (List.rev largs_values) >>= fun (v, st) -> (
+            match ord, v with
+            | None, _ -> OK (None, st)
+            | Some rd, Some v -> Hashtbl.replace st.regs rd v; OK (None, st)
+            | Some _, None -> Error "Call to function without return value"
+          )
+        | Error(_) ->
+          do_builtin oc st.mem fname largs_values >>= fun (v) -> (
+            match ord, v with
+            | None, _ -> OK (None, st)
+            | Some rd, Some v -> Hashtbl.replace st.regs rd v; OK (None, st)
+            | Some _, None -> Error "Call to function without return value"
+          )
 
 and exec_linear_instr_at oc lp fname ({  linearfunbody;  } as f) st i =
   let l = List.drop_while (fun x -> x <> Rlabel i) linearfunbody in

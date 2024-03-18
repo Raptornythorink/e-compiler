@@ -10,6 +10,7 @@ let rec vars_in_expr (e: expr) =
    | Eint(_) -> Set.empty
    | Eunop(_, e) -> vars_in_expr e
    | Ebinop(_, e1, e2) -> Set.union (vars_in_expr e1) (vars_in_expr e2)
+   | Ecall(_, args) -> List.fold_left (fun acc e -> Set.union acc (vars_in_expr e)) Set.empty args
 
 (* [live_after_node cfg n] renvoie l'ensemble des variables vivantes après le
    nœud [n] dans un CFG [cfg]. [lives] est l'état courant de l'analyse,
@@ -25,9 +26,9 @@ let live_cfg_node (node: cfg_node) (live_after: string Set.t) =
    match node with
    | Cassign(v, e, _) -> Set.union (vars_in_expr e) (Set.remove v live_after)
    | Creturn(e) -> Set.union (vars_in_expr e) live_after
-   | Cprint(e, _) -> Set.union (vars_in_expr e) live_after
    | Ccmp(e, _, _) -> Set.union (vars_in_expr e) live_after
    | Cnop(_) -> live_after
+   | Ccall(f, args, _) -> Set.union (vars_in_expr (Ecall(f, args))) live_after
 
 (* [live_cfg_nodes cfg lives] effectue une itération du calcul de point fixe.
 

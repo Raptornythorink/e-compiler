@@ -25,6 +25,13 @@ let rec cfg_expr_of_eexpr (e: Elang.expr) : expr res =
   | Elang.Eint i -> OK (Eint i)
   | Elang.Evar v ->
     OK (Evar v)
+  | Elang.Ecall (f, el) ->
+    List.fold_right (fun e acc ->
+        acc >>= fun el ->
+        cfg_expr_of_eexpr e >>= fun e ->
+        OK (e::el)
+      ) el (OK []) >>= fun el ->
+    OK (Ecall (f, el))
 
 (* [cfg_node_of_einstr next cfg succ i] builds the CFG node(s) that correspond
    to the E instruction [i].
@@ -66,9 +73,13 @@ let rec cfg_node_of_einstr (next: int) (cfg : (int, cfg_node) Hashtbl.t)
   | Elang.Ireturn e ->
     cfg_expr_of_eexpr e >>= fun e ->
     Hashtbl.replace cfg next (Creturn e); OK (next, next + 1)
-  | Elang.Iprint e ->
-    cfg_expr_of_eexpr e >>= fun e ->
-    Hashtbl.replace cfg next (Cprint (e,succ));
+  | Elang.Icall(f, el) ->
+    List.fold_right (fun e acc ->
+        acc >>= fun el ->
+        cfg_expr_of_eexpr e >>= fun e ->
+        OK (e::el)
+      ) el (OK []) >>= fun el ->
+    Hashtbl.replace cfg next (Ccall(f, el, succ));
     OK (next, next + 1)
 
 (* Some nodes may be unreachable after the CFG is entirely generated. The
@@ -81,13 +92,12 @@ let rec reachable_nodes n (cfg: (int,cfg_node) Hashtbl.t) =
       match Hashtbl.find_option cfg n with
       | None -> reach
       | Some (Cnop succ)
-      | Some (Cprint (_, succ))
       | Some (Cassign (_, _, succ)) -> reachable_aux succ reach
       | Some (Creturn _) -> reach
       | Some (Ccmp (_, s1, s2)) ->
         reachable_aux s1 (reachable_aux s2 reach)
+      | Some(Ccall(_, _, succ)) -> reachable_aux succ reach
   in reachable_aux n Set.empty
-
 (* [cfg_fun_of_efun f] builds the CFG for E function [f]. *)
 let cfg_fun_of_efun { funargs; funbody } =
   let cfg = Hashtbl.create 17 in
