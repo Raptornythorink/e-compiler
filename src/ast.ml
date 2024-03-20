@@ -28,8 +28,8 @@ type tag = Tassign | Tif | Twhile | Tblock | Treturn
          | Tclt | Tcgt | Tcle | Tcge | Tceq | Tne
          | Tneg
          | Tlistglobdef
-         | Tfundef | Tfunname | Tfunargs | Tfunbody
-         | Tassignvar
+         | Tfundef | Tfunname | Tfunargs | Tfunbody | Tfunrettype
+         | Tvardef | Tassignvar
          | Targ
          | Tcall | Targs
 
@@ -71,6 +71,8 @@ let string_of_tag = function
   | Tfunname -> "Tfunname"
   | Tfunargs -> "Tfunargs"
   | Tfunbody -> "Tfunbody"
+  | Tfunrettype -> "Tfunrettype"
+  | Tvardef -> "Tvardef"
   | Tassignvar -> "Tassignvar"
   | Targ -> "Targ"
   | Tcall -> "Tcall"

@@ -22,7 +22,8 @@ let rec cfg_expr_of_eexpr (e: Elang.expr) : expr res =
   | Elang.Eunop (u, e) ->
     cfg_expr_of_eexpr e >>= fun ee ->
     OK (Eunop (u, ee))
-  | Elang.Eint i -> OK (Eint i)
+  | Elang.Eint i -> OK(Eint(i))
+  | Elang.Echar c -> OK(Eint(int_of_char c))
   | Elang.Evar v ->
     OK (Evar v)
   | Elang.Ecall (f, el) ->
@@ -106,7 +107,7 @@ let cfg_fun_of_efun { funargs; funbody } =
   (* remove unreachable nodes *)
   let r = reachable_nodes node cfg in
   Hashtbl.filteri_inplace (fun k _ -> Set.mem k r) cfg;
-  OK { cfgfunargs = funargs;
+  OK { cfgfunargs = List.map fst funargs;
        cfgfunbody = cfg;
        cfgentry = node;
      }
