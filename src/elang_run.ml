@@ -39,6 +39,7 @@ let rec eval_eexpr prog oc st (e : expr) : (int * int state) res=
       eval_eexpr prog oc st e >>= fun (v, st') ->
       OK(eval_unop u v, st')
    | Eint(i) -> OK(i, st)
+   | Echar(c) -> OK(Char.code c, st)
    | Evar(v) -> (
       match Hashtbl.find_option st.env v with
       | Some v -> OK(v, st)
@@ -119,7 +120,7 @@ and eval_efun prog oc (st: int state) ({ funargs; funbody}: efun)
      seulement ses arguments), puis on restore l'environnement de l'appelant. *)
   let env_save = Hashtbl.copy st.env in
   let env = Hashtbl.create 17 in
-  match List.iter2 (fun a v -> Hashtbl.replace env a v) funargs vargs with
+  match List.iter2 (fun a v -> Hashtbl.replace env (fst a) v) funargs vargs with
   | () ->
     eval_einstr prog oc { st with env } funbody >>= fun (v, st') ->
     OK (v, { st' with env = env_save })

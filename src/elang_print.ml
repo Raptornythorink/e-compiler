@@ -25,6 +25,7 @@ let rec dump_eexpr = function
   | Ebinop(b, e1, e2) -> Printf.sprintf "(%s %s %s)" (dump_eexpr e1) (dump_binop b) (dump_eexpr e2)
   | Eunop(u, e) -> Printf.sprintf "(%s %s)" (dump_unop u) (dump_eexpr e)
   | Eint i -> Printf.sprintf "%d" i
+  | Echar c -> Printf.sprintf "'%c'" c
   | Evar s -> Printf.sprintf "%s" s
   | Ecall (f, args) -> Printf.sprintf "%s(%s)" f (String.concat ", " (List.map dump_eexpr args))
 
@@ -66,7 +67,7 @@ let dump_einstr oc i = dump_einstr_rec 0 oc i
 let dump_efun oc funname {funargs; funbody} =
   Format.fprintf oc "%s(%s) {\n%a\n}\n"
     funname
-    (String.concat "," funargs)
+    (String.concat "," (List.map (fun (varname, vartype) -> string_of_typ vartype ^ " " ^ varname)funargs))
     dump_einstr funbody
 
 let dump_eprog oc = dump_prog dump_efun oc
