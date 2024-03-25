@@ -58,6 +58,9 @@ let rec rtl_instrs_of_cfg_expr (next_reg, var2reg) (e: expr) =
                                (rargs @ [r], largs @ l, next_reg, var2reg)
                              ) ([], [], next_reg, var2reg) args in
                          (next_reg1, largs @ [Rcall(Some(next_reg1), f, rargs)], next_reg1 + 1, var2reg1)
+    | Estk(i) -> (next_reg, [Rstk(next_reg, i)], next_reg + 1, var2reg)
+    | Eload(e, sz) -> let r1, l1, next_reg1, var2reg1 = rtl_instrs_of_cfg_expr (next_reg, var2reg) e in
+                      (next_reg1, l1 @ [Rload(next_reg1, r1, sz)], next_reg1 + 1, var2reg1)
 
 let is_cmp_op =
   function Eclt -> Some Rclt
@@ -95,8 +98,11 @@ let rtl_instrs_of_cfg_node ((next_reg:int), (var2reg: (string*int) list)) (c: cf
                                 (rargs @ [r], largs @ l, next_reg, var2reg)
                               ) ([], [], next_reg, var2reg) args in
                           (largs @ [Rcall(None, f, rargs); Rjmp(s)], next_reg1, var2reg1)
+    | Cstore(addr, v, sz, succ) -> let r1, l1, next_reg1, var2reg1 = rtl_instrs_of_cfg_expr (next_reg, var2reg) addr in
+                                   let r2, l2, next_reg2, var2reg2 = rtl_instrs_of_cfg_expr (next_reg1, var2reg1) v in
+                                   (l1 @ l2 @ [Rstore(r1, r2, sz); Rjmp(succ)], next_reg2, var2reg2)
 
-let rtl_instrs_of_cfg_fun cfgfunname ({ cfgfunargs; cfgfunbody; cfgentry }: cfg_fun) =
+let rtl_instrs_of_cfg_fun cfgfunname ({ cfgfunargs; cfgfunbody; cfgentry; cfgfunstksz }: cfg_fun) =
   let (rargs, next_reg, var2reg) =
     List.fold_left (fun (rargs, next_reg, var2reg) a ->
         let (r, next_reg, var2reg) = find_var (next_reg, var2reg) a in
@@ -115,6 +121,7 @@ let rtl_instrs_of_cfg_fun cfgfunname ({ cfgfunargs; cfgfunbody; cfgentry }: cfg_
     rtlfunentry = cfgentry;
     rtlfunbody;
     rtlfuninfo = var2reg;
+    rtlfunstksz = cfgfunstksz;
   }
 
 let rtl_of_gdef funname = function

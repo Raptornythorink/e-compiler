@@ -1,4 +1,4 @@
-tokens SYM_EOF SYM_IDENTIFIER<string> SYM_INTEGER<int> SYM_CHARACTER<char> SYM_PLUS SYM_MINUS SYM_ASTERISK SYM_DIV SYM_MOD
+tokens SYM_EOF SYM_IDENTIFIER<string> SYM_INTEGER<int> SYM_CHARACTER<char> SYM_PLUS SYM_MINUS SYM_ASTERISK SYM_DIV SYM_MOD SYM_AMPERSAND
 tokens SYM_LPARENTHESIS SYM_RPARENTHESIS SYM_LBRACE SYM_RBRACE
 tokens SYM_ASSIGN SYM_SEMICOLON SYM_RETURN SYM_IF SYM_WHILE SYM_ELSE SYM_COMMA
 tokens SYM_EQUALITY SYM_NOTEQ SYM_LT SYM_LEQ SYM_GT SYM_GEQ
@@ -13,7 +13,7 @@ non-terminals MUL_EXPRS MUL_EXPR
 non-terminals CMP_EXPRS CMP_EXPR
 non-terminals EQ_EXPRS EQ_EXPR
 non-terminals VAR_OR_FUNCALL_INSTR VAR_OR_FUNCALL_EXPR
-non-terminals TYPE
+non-terminals BASE_TYPE TYPE PTR_TYPE
 axiom S
 {
 
@@ -24,7 +24,6 @@ axiom S
   open Batteries
   open Utils
 
-  (* TODO *)
   let rec resolve_associativity term other =
        match other with
        | [] -> term
@@ -34,9 +33,12 @@ axiom S
 
 rules
 S -> FUNDEFS SYM_EOF { Node (Tlistglobdef, $1) }
-TYPE -> SYM_INT { StringLeaf "int" }
-TYPE -> SYM_CHAR { StringLeaf "char" }
-TYPE -> SYM_VOID { StringLeaf "void" }
+BASE_TYPE -> SYM_INT { StringLeaf "int" }
+BASE_TYPE -> SYM_CHAR { StringLeaf "char" }
+BASE_TYPE -> SYM_VOID { StringLeaf "void" }
+TYPE -> BASE_TYPE PTR_TYPE { $2 $1 }
+PTR_TYPE -> SYM_ASTERISK PTR_TYPE { fun leaf -> $2 (StringLeaf((string_of_stringleaf leaf)^"*")) }
+PTR_TYPE -> { fun leaf -> StringLeaf((string_of_stringleaf leaf)) }
 FUNDEFS -> FUNDEF FUNDEFS { $1::$2 }
 FUNDEFS -> { [] }
 FUNDEF -> TYPE IDENTIFIER SYM_LPARENTHESIS LPARAMS SYM_RPARENTHESIS REST_FUNDEF { Node (Tfundef, [Node(Tfunrettype, [$1]); Node(Tfunname, [$2]); Node(Tfunargs, $4); Node(Tfunbody, [$6]);]) }
@@ -62,6 +64,7 @@ INSTR -> SYM_IF SYM_LPARENTHESIS EXPR SYM_RPARENTHESIS LINSTRS ELSE { Node(Tif, 
 INSTR -> SYM_WHILE SYM_LPARENTHESIS EXPR SYM_RPARENTHESIS INSTR { Node(Twhile, [$3; $5]) }
 INSTR -> SYM_RETURN EXPR SYM_SEMICOLON { Node(Treturn, [$2]) }
 INSTR -> TYPE IDENTIFIER VARDEF SYM_SEMICOLON { Node(Tvardef, [$1; $2; $3]) }
+INSTR -> SYM_ASTERISK EXPR SYM_ASSIGN EXPR SYM_SEMICOLON { Node(Tstore, [$2; $4]) }
 VARDEF -> SYM_ASSIGN EXPR { Node(Tassignvar, [$2]) }
 VARDEF -> { NullLeaf }
 VAR_OR_FUNCALL_INSTR -> SYM_LPARENTHESIS CALL_PARAMS SYM_RPARENTHESIS SYM_SEMICOLON { fun id -> Node(Tcall, [Node(Tfunname, [id]); Node(Targs, $2)]) }
@@ -94,5 +97,7 @@ FACTOR -> INTEGER { Node(Tint, [$1]) }
 FACTOR -> CHAR { $1 }
 FACTOR -> SYM_LPARENTHESIS EXPR SYM_RPARENTHESIS { $2 }
 FACTOR -> SYM_MINUS FACTOR { Node (Tneg, [$2]) }
+FACTOR -> SYM_ASTERISK FACTOR { Node (Tload, [$2]) }
+FACTOR -> SYM_AMPERSAND FACTOR { Node (Taddrof, [$2]) }
 VAR_OR_FUNCALL_EXPR -> SYM_LPARENTHESIS CALL_PARAMS SYM_RPARENTHESIS { fun id -> Node(Tcall, [Node(Tfunname, [id]); Node(Targs, $2)]) }
 VAR_OR_FUNCALL_EXPR -> { fun id -> id }

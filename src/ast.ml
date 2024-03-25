@@ -26,10 +26,10 @@ type tag = Tassign | Tif | Twhile | Tblock | Treturn
          | Tint
          | Tadd | Tmul | Tdiv | Tmod | Txor | Tsub
          | Tclt | Tcgt | Tcle | Tcge | Tceq | Tne
-         | Tneg
+         | Tneg | Taddrof | Tload
          | Tlistglobdef
          | Tfundef | Tfunname | Tfunargs | Tfunbody | Tfunrettype
-         | Tvardef | Tassignvar
+         | Tvardef | Tassignvar | Tstore
          | Targ
          | Tcall | Targs
 
@@ -66,6 +66,8 @@ let string_of_tag = function
   | Tceq -> "Tceq"
   | Tne -> "Tne"
   | Tneg -> "Tneg"
+  | Taddrof -> "Taddrof"
+  | Tload -> "Tload"
   | Tlistglobdef -> "Tlistglobdef"
   | Tfundef -> "Tfundef"
   | Tfunname -> "Tfunname"
@@ -74,6 +76,7 @@ let string_of_tag = function
   | Tfunrettype -> "Tfunrettype"
   | Tvardef -> "Tvardef"
   | Tassignvar -> "Tassignvar"
+  | Tstore -> "Tstore"
   | Targ -> "Targ"
   | Tcall -> "Tcall"
   | Targs -> "Targs"

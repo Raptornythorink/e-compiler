@@ -15,11 +15,15 @@ type rtl_instr = Rbinop of binop * reg * reg * reg
                | Rret of reg
                | Rlabel of int
                | Rcall of reg option * string * reg list
+               | Rstk of reg * int
+               | Rload of reg * reg * int
+               | Rstore of reg * reg * int
 
 type rtl_fun = { rtlfunargs: reg list;
                  rtlfunbody: (int, rtl_instr list) Hashtbl.t;
                  rtlfunentry: int;
-                 rtlfuninfo: (string*reg) list
+                 rtlfuninfo: (string*reg) list;
+                 rtlfunstksz: int;
                }
 
 let written_rtl_regs_instr (i: rtl_instr) =
@@ -28,6 +32,9 @@ let written_rtl_regs_instr (i: rtl_instr) =
   | Runop (_, rd, _)
   | Rconst (rd, _)
   | Rcall (Some rd, _, _)
+  | Rstk(rd, _)
+  | Rload(rd, _, _)
+  | Rstore(rd, _, _)
   | Rmov (rd, _) -> Set.singleton rd
   | Rret _
   | Rlabel _
