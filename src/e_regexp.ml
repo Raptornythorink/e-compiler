@@ -80,6 +80,7 @@ let list_regexp : (regexp * (string -> token option)) list =
     (keyword_regexp "*", fun _ -> Some (SYM_ASTERISK));
     (keyword_regexp "/", fun _ -> Some (SYM_DIV));
     (keyword_regexp "%", fun _ -> Some (SYM_MOD));
+    (keyword_regexp "&", fun _ -> Some (SYM_AMPERSAND));
     (keyword_regexp "{", fun _ -> Some (SYM_LBRACE));
     (keyword_regexp "}", fun _ -> Some (SYM_RBRACE));
     (keyword_regexp "[", fun _ -> Some (SYM_LBRACKET));

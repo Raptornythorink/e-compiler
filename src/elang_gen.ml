@@ -39,12 +39,31 @@ let binop_of_tag =
   | Tne -> Ecne
   | _ -> assert false
 
-  let compatible_types t1 t2 =
-    if t1 = t2 then true else
-    match t1, t2 with
-    | Tvoid, _ -> false
-    | _, Tvoid -> false
-    | _, _ -> true
+let is_cmp_op =
+  function
+    Ecle -> true
+  | Eclt -> true
+  | Ecge -> true
+  | Ecgt -> true
+  | Eceq -> true
+  | Ecne -> true
+  | _ -> false
+
+let compatible_types op t1 t2 =
+  if t1 = t2 then true else
+  match op, t1, t2 with
+  | _, Tvoid, _ -> false
+  | _, _, Tvoid -> false
+  | Eadd, Tptr(_), Tint -> true
+  | Eadd, Tint, Tptr(_) -> true
+  | Esub, Tptr(_), Tint -> true
+  | Eadd, Tptr(_), Tchar -> true
+  | Eadd, Tchar, Tptr(_) -> true
+  | Esub, Tptr(_), Tchar -> true
+  | op, Tptr(t1), Tptr(t2) -> (t1 = t2) && (is_cmp_op op)
+  | _, Tptr(_), _ -> false
+  | _, _, Tptr(_) -> false
+  | _, _, _ -> true
 
 let rec type_expr (typ_var : (string, typ) Hashtbl.t) (typ_fun : (string, typ list * typ) Hashtbl.t) (e: expr) : typ res =
   match e with
@@ -55,10 +74,10 @@ let rec type_expr (typ_var : (string, typ) Hashtbl.t) (typ_fun : (string, typ li
       OK(Hashtbl.find typ_var v)
     else
       Error(Printf.sprintf "Variable %s not found" v)
-  | Ebinop(_, e1, e2) ->
+  | Ebinop(op, e1, e2) ->
     type_expr typ_var typ_fun e1 >>= fun t1 ->
     type_expr typ_var typ_fun e2 >>= fun t2 ->
-    if compatible_types t1 t2 then
+    if compatible_types op t1 t2 then
       OK(t1)
     else
       Error (Printf.sprintf "Type error in binary operation")
@@ -84,6 +103,43 @@ let rec type_expr (typ_var : (string, typ) Hashtbl.t) (typ_fun : (string, typ li
         Error(Printf.sprintf "Wrong number of arguments while calling function %s" f)
     else
       Error(Printf.sprintf "Function %s not found" f)
+    | Eaddrof(e) -> type_expr typ_var typ_fun e >>= fun t -> OK(Tptr(t))
+    | Eload(e) -> type_expr typ_var typ_fun e >>= fun t -> (match t with
+      | Tptr(t) -> OK(t)
+      | _ -> Error(Printf.sprintf "Type error in Eload: expected pointer, got %s" (string_of_typ t))
+    )
+
+let rec var_of_expr (e: expr) : string Set.t =
+  match e with
+  | Eint(_) -> Set.empty
+  | Echar(_) -> Set.empty
+  | Evar(v) -> Set.singleton v
+  | Eaddrof(e) -> var_of_expr e
+  | Eload(e) -> var_of_expr e
+  | Ebinop(_, e1, e2) -> Set.union (var_of_expr e1) (var_of_expr e2)
+  | Eunop(_, e) -> var_of_expr e
+  | Ecall(_, args) -> List.fold_left (fun acc e -> Set.union acc (var_of_expr e)) Set.empty args
+
+let rec addr_taken_expr (e: expr) : string Set.t =
+  match e with
+  | Eint(_) -> Set.empty
+  | Echar(_) -> Set.empty
+  | Evar(v) -> Set.empty
+  | Eaddrof(e) -> var_of_expr e
+  | Eload(e) -> addr_taken_expr e
+  | Ebinop(_, e1, e2) -> Set.union (addr_taken_expr e1) (addr_taken_expr e2)
+  | Eunop(_, e) -> addr_taken_expr e
+  | Ecall(_, args) -> List.fold_left (fun acc e -> Set.union acc (addr_taken_expr e)) Set.empty args
+
+let rec addr_taken_instr (i: instr) : string Set.t =
+  match i with
+  | Iassign(v, e) -> addr_taken_expr e
+  | Istore(e1, e2) -> Set.union (addr_taken_expr e1) (addr_taken_expr e2)
+  | Iif(e, i1, i2) -> Set.union (addr_taken_expr e) (Set.union (addr_taken_instr i1) (addr_taken_instr i2))
+  | Iwhile(e, i) -> Set.union (addr_taken_expr e) (addr_taken_instr i)
+  | Iblock(l) -> List.fold_left (fun acc i -> Set.union acc (addr_taken_instr i)) Set.empty l
+  | Ireturn(e) -> addr_taken_expr e
+  | Icall(_, args) -> List.fold_left (fun acc e -> Set.union acc (addr_taken_expr e)) Set.empty args
 
 (* [make_eexpr_of_ast a] builds an expression corresponding to a tree [a]. If
    the tree is not well-formed, fails with an [Error] message. *)
@@ -106,6 +162,10 @@ let rec make_eexpr_of_ast typ_var typ_fun (a: tree) : expr res =
     | Node(Tcall, [Node(Tfunname, [StringLeaf(fname)]); Node(Targs, args)]) ->
       list_map_res (make_eexpr_of_ast typ_var typ_fun) args >>= fun eargs ->
       OK(Ecall(fname, eargs))
+    | Node(Taddrof, [StringLeaf(v)]) -> OK(Eaddrof(Evar(v)))
+    | Node(Taddrof, [Node(Tload, [e])]) -> make_eexpr_of_ast typ_var typ_fun e
+    | Node(Tload, [e]) -> make_eexpr_of_ast typ_var typ_fun e >>= fun exp ->
+      OK(Eload(exp))
     | _ -> Error (Printf.sprintf "Unacceptable ast in make_eexpr_of_ast %s"
                     (string_of_ast a))
   in
@@ -125,7 +185,7 @@ let rec make_einstr_of_ast typ_var typ_fun (a: tree) : instr res =
             let var_type = Hashtbl.find typ_var var in
             if var_type = Tvoid then
               Error(Printf.sprintf "Cannot assign to void variable %s" var)
-            else if compatible_types (Hashtbl.find typ_var var) texp then
+            else if compatible_types Eceq (Hashtbl.find typ_var var) texp then
               OK(Iassign(var, exp))
             else
               Error(Printf.sprintf "Type error while assigning to variable %s: expected %s, got %s" var (string_of_typ (Hashtbl.find typ_var var)) (string_of_typ texp))
@@ -163,20 +223,18 @@ let rec make_einstr_of_ast typ_var typ_fun (a: tree) : instr res =
           OK(Iblock([]))
     | Node(Tvardef, [StringLeaf("void"); StringLeaf(vname); NullLeaf]) ->
         Error(Printf.sprintf "Cannot declare variable %s of type void" vname)
-    | Node(Tvardef, [StringLeaf("int"); StringLeaf(vname); Node(Tassignvar,[a'])])->
-        Hashtbl.replace typ_var vname Tint;
+    | Node(Tvardef, [StringLeaf(t); StringLeaf(vname); Node(Tassignvar,[a'])])->
+        typ_of_string t >>= fun t ->
+        Hashtbl.replace typ_var vname t;
         make_eexpr_of_ast typ_var typ_fun a' >>= fun i ->
-          if compatible_types (Hashtbl.find typ_var vname) Tint then
+          if compatible_types Eceq (Hashtbl.find typ_var vname) t then
             OK(Iassign(vname, i))
           else
             Error(Printf.sprintf "Type error while assigning to variable %s: expected %s, got %s" vname (string_of_typ (Hashtbl.find typ_var vname)) (string_of_typ Tint))
-    | Node(Tvardef, [StringLeaf("char"); StringLeaf(vname); Node(Tassignvar, [a'])]) ->
-        Hashtbl.replace typ_var vname Tchar;
-        make_eexpr_of_ast typ_var typ_fun a' >>= fun i ->
-          if compatible_types (Hashtbl.find typ_var vname) Tchar then
-            OK(Iassign(vname, i))
-          else
-            Error(Printf.sprintf "Type error while assigning to variable %s: expected %s, got %s" vname (string_of_typ (Hashtbl.find typ_var vname)) (string_of_typ Tchar))
+    | Node(Tstore, [e1; e2]) ->
+        make_eexpr_of_ast typ_var typ_fun e1 >>= fun exp1 ->
+        make_eexpr_of_ast typ_var typ_fun e2 >>= fun exp2 ->
+        OK(Istore(exp1, exp2))
     | _ -> Error (Printf.sprintf "Unacceptable ast in make_einstr_of_ast %s"
                     (string_of_ast a))
   in
@@ -187,24 +245,30 @@ let rec make_einstr_of_ast typ_var typ_fun (a: tree) : instr res =
 
 let make_ident (a: tree) : (string * typ) res =
   match a with
-  | Node (Targ, [StringLeaf("int"); s]) ->
-    OK(string_of_stringleaf s, Tint)
-  | Node (Targ, [StringLeaf("char"); s]) ->
-    OK(string_of_stringleaf s, Tchar)
+  | Node (Targ, [StringLeaf(t); s]) ->
+    typ_of_string t >>= fun t ->
+    OK(string_of_stringleaf s, t)
   | a -> Error (Printf.sprintf "make_ident: unexpected AST: %s"
                   (string_of_ast a))
 
 let make_fundef_of_ast typ_fun (a: tree) : (string * efun) res =
   match a with
-  | Node (Tfundef, [Node(Tfunrettype, [StringLeaf(rettype)]); Node(Tfunname, [StringLeaf(fname)]); Node (Tfunargs, fargs); Node(Tfunbody, [fbody])]) ->
+  | Node (Tfundef, [Node(Tfunrettype, [StringLeaf(rettype)]); Node(Tfunname, [StringLeaf(funname)]); Node (Tfunargs, fargs); Node(Tfunbody, [fbody])]) ->
     list_map_res make_ident fargs >>= fun funargs ->
     let typ_var = Hashtbl.create 17 in
     List.iter (fun (s, t) -> Hashtbl.replace typ_var s t) funargs;
     typ_of_string rettype >>= fun funrettype ->
     let argstype = List.map snd funargs in
-    Hashtbl.replace typ_fun fname (argstype, funrettype);
+    Hashtbl.replace typ_fun funname (argstype, funrettype);
     make_einstr_of_ast typ_var typ_fun fbody >>= fun funbody ->
-     OK((fname, { funargs = funargs; funbody = funbody; funvartype = typ_var; funrettype = funrettype }))
+    let addr_taken = addr_taken_instr funbody in
+    let funvarinmem = Hashtbl.create (Set.cardinal addr_taken) in
+    let funstksz = Set.fold (fun v sp -> 
+      match size_type (Hashtbl.find typ_var v) with
+      | OK(size) -> Hashtbl.add funvarinmem v sp; (sp + size)
+      | Error(_) -> sp
+    ) addr_taken 0 in
+     OK((funname, { funname; funargs; funbody; funvartype = typ_var; funrettype; funvarinmem; funstksz }))
   | _ ->
     Error (Printf.sprintf "make_fundef_of_ast: Expected a Tfundef, got %s."
              (string_of_ast a))

@@ -9,6 +9,8 @@ let rec dump_cfgexpr : expr -> string = function
   | Eint i -> Format.sprintf "%d" i
   | Evar s -> Format.sprintf "%s" s
   | Ecall (f, args) -> Format.sprintf "%s(%s)" f (List.map dump_cfgexpr args |> String.concat ", ")
+  | Estk(i) -> Format.sprintf "stk[%d]" i
+  | Eload(e, i) -> Format.sprintf "&%s[%d]" (dump_cfgexpr e) i
 
 let dump_list_cfgexpr l =
   l |> List.map dump_cfgexpr |> String.concat ", "
@@ -25,6 +27,8 @@ let dump_arrows oc fname n (node: cfg_node) =
     Format.fprintf oc "n_%s_%d -> n_%s_%d [label=\"else\"]\n" fname n fname succ2
   | Ccall (_, _, succ) ->
     Format.fprintf oc "n_%s_%d -> n_%s_%d\n" fname n fname succ
+  | Cstore(_, _, _, succ) ->
+    Format.fprintf oc "n_%s_%d -> n_%s_%d\n" fname n fname succ
 
 
 let dump_cfg_node oc (node: cfg_node) =
@@ -34,7 +38,7 @@ let dump_cfg_node oc (node: cfg_node) =
   | Ccmp (e, _, _) -> Format.fprintf oc "%s" (dump_cfgexpr e)
   | Cnop _ -> Format.fprintf oc "nop"
   | Ccall (f, args, _) -> Format.fprintf oc "%s(%s)" f (dump_list_cfgexpr args)
-
+  | Cstore (e1, e2, sz, _) -> Format.fprintf oc "*%s[%d] = %s" (dump_cfgexpr e1) sz (dump_cfgexpr e2)
 
 let dump_liveness_state oc ht state =
   Hashtbl.iter (fun n cn ->

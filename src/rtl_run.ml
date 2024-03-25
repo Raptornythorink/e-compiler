@@ -29,16 +29,16 @@ let eval_rtl_cmp = function
   | Rceq -> (=)
   | Rcne -> (<>)
 
-let rec exec_rtl_instr oc rp rtlfunname f st (i: rtl_instr) =
+let rec exec_rtl_instr oc rp rtlfunname f sp st (i: rtl_instr) =
   match i with
-  | Rbinop (b, rd, rs1, rs2) ->
-    begin match Hashtbl.find_option st.regs rs1,
-                Hashtbl.find_option st.regs rs2 with
-    | Some v1, Some v2 ->
-               Hashtbl.replace st.regs rd (eval_binop b v1 v2);
-      OK (None, st)
-    | _, _ -> Error (Printf.sprintf "Binop applied on undefined registers (%s and %s)" (print_reg rs1) (print_reg rs2))
-    end
+    | Rbinop (b, rd, rs1, rs2) ->
+      begin match Hashtbl.find_option st.regs rs1,
+                  Hashtbl.find_option st.regs rs2 with
+      | Some v1, Some v2 ->
+                Hashtbl.replace st.regs rd (eval_binop b v1 v2);
+        OK (None, st)
+      | _, _ -> Error (Printf.sprintf "Binop applied on undefined registers (%s and %s)" (print_reg rs1) (print_reg rs2))
+      end
   | Runop (u, rd, rs) ->
     begin match Hashtbl.find_option st.regs rs with
     | Some v ->
@@ -53,10 +53,10 @@ let rec exec_rtl_instr oc rp rtlfunname f st (i: rtl_instr) =
     begin match Hashtbl.find_option st.regs r1,
                 Hashtbl.find_option st.regs r2 with
     | Some v1, Some v2 ->
-      (if eval_rtl_cmp cmp v1 v2 then exec_rtl_instr_at oc rp rtlfunname f st s1 else OK (None, st))
+      (if eval_rtl_cmp cmp v1 v2 then exec_rtl_instr_at oc rp rtlfunname f sp st s1 else OK (None, st))
     | _, _ -> Error (Printf.sprintf "Branching on undefined registers (%s and %s)" (print_reg r1) (print_reg r2))
     end
-  | Rjmp s -> exec_rtl_instr_at oc rp rtlfunname f st s
+  | Rjmp s -> exec_rtl_instr_at oc rp rtlfunname f sp st s
   | Rmov (rd, rs) ->
     begin match Hashtbl.find_option st.regs rs with
     | Some s ->
@@ -79,12 +79,12 @@ let rec exec_rtl_instr oc rp rtlfunname f st (i: rtl_instr) =
         | Some value -> OK (value :: param_values)
         | None -> Error (Printf.sprintf "Undefined register (%s)" (print_reg key))
     ) (OK []) rargs in
-    match rargs_values_result with
+    (match rargs_values_result with
     | Error(e) -> Error e
     | OK(rargs_values) ->
       match find_function rp fname with
-      | OK(f) ->
-        exec_rtl_fun oc rp st fname f (List.rev rargs_values) >>= fun (v, st) -> (
+      | OK(f') ->
+        exec_rtl_fun oc rp (sp + f.rtlfunstksz) st fname f' (List.rev rargs_values) >>= fun (v, st) -> (
           match ord, v with
           | None, _ -> OK (None, st)
           | Some rd, Some v -> Hashtbl.replace st.regs rd v; OK (None, st)
@@ -97,22 +97,43 @@ let rec exec_rtl_instr oc rp rtlfunname f st (i: rtl_instr) =
           | Some rd, Some v -> Hashtbl.replace st.regs rd v; OK (None, st)
           | Some _, None -> Error (Format.sprintf "RTL: Call to function %s without return value" fname)
         )
+    )
+    | Rstk(rd, i) ->
+        Hashtbl.replace st.regs rd (sp + i);
+        OK (None, st)
+    | Rload(rd, rs, sz) ->
+        begin match Hashtbl.find_option st.regs rs with
+        | Some addr ->
+          Mem.read_bytes_as_int st.mem addr sz >>= fun v ->
+          Hashtbl.replace st.regs rd v;
+          OK (None, st)
+        | None -> Error (Printf.sprintf "Load from undefined register (%s)" (print_reg rs))
+        end
+    | Rstore(rd, rs, sz) ->
+        begin match Hashtbl.find_option st.regs rd, Hashtbl.find_option st.regs rs with
+        | Some addr, Some v ->
+          Mem.write_bytes st.mem addr (split_bytes sz v) >>= fun _ ->
+          OK (None, st)
+        | Some addr, _ -> Error (Printf.sprintf "Store from undefined register (%s)" (print_reg rs))
+        | _, _ -> Error (Printf.sprintf "Store to undefined register (%s)" (print_reg rd))
+        
+        end
 
-and exec_rtl_instr_at oc rp rtlfunname ({ rtlfunbody;  } as f: rtl_fun) st i =
+and exec_rtl_instr_at oc rp rtlfunname ({ rtlfunbody;  } as f: rtl_fun) sp st i =
   match Hashtbl.find_option rtlfunbody i with
-  | Some l -> exec_rtl_instrs oc rp rtlfunname f st l
+  | Some l -> exec_rtl_instrs oc rp rtlfunname f sp st l
   | None -> Error (Printf.sprintf "Jump to undefined label (%s_%d)" rtlfunname i)
 
-and exec_rtl_instrs oc rp rtlfunname f st l =
+and exec_rtl_instrs oc rp rtlfunname f sp st l =
   List.fold_left (fun acc i ->
       match acc with
       | Error _ -> acc
       | OK (Some v, st) -> OK (Some v, st)
       | OK (None, st) ->
-        exec_rtl_instr oc rp rtlfunname f st i
+        exec_rtl_instr oc rp rtlfunname f sp st i
     ) (OK (None, st)) l
 
-and exec_rtl_fun oc rp st rtlfunname f params =
+and exec_rtl_fun oc rp sp st rtlfunname f params =
   let regs' = Hashtbl.create 17 in
   match List.iter2 (fun n v -> Hashtbl.replace regs' n v) f.rtlfunargs params with
   | exception Invalid_argument _ ->
@@ -128,7 +149,7 @@ and exec_rtl_fun oc rp st rtlfunname f params =
     | Some l ->
       let regs_save = Hashtbl.copy st.regs in
       let st' = {st with regs = regs'; } in
-      exec_rtl_instrs oc rp rtlfunname f st' l >>= fun (v, st) ->
+      exec_rtl_instrs oc rp rtlfunname f sp st' l >>= fun (v, st) ->
         OK(v, {st with regs = regs_save })
 
 and exec_rtl_prog oc rp memsize params =
@@ -136,5 +157,5 @@ and exec_rtl_prog oc rp memsize params =
   find_function rp "main" >>= fun f ->
   let n = List.length f.rtlfunargs in
   let params = take n params in
-  exec_rtl_fun oc rp st "main" f params >>= fun (v, st) ->
+  exec_rtl_fun oc rp 0 st "main" f params >>= fun (v, st) ->
   OK v

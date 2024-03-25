@@ -72,16 +72,27 @@ type typ =
   | Tint
   | Tchar
   | Tvoid
+  | Tptr of typ
 
-let string_of_typ t =
+let rec string_of_typ t =
   match t with
   | Tint -> "int"
   | Tchar -> "char"
   | Tvoid -> "void"
+  | Tptr t' -> Printf.sprintf "%s*" (string_of_typ t')
 
-let typ_of_string s =
+let rec typ_of_string s =
   match s with
   | "int" -> OK Tint
   | "char" -> OK Tchar
   | "void" -> OK Tvoid
+  | "*" -> Error "Cannot parse type * without a base type"
+  | s when String.ends_with s "*" -> typ_of_string (String.sub s 0 (String.length s - 1)) >>= fun t -> OK (Tptr t)
   | _ -> Error (Printf.sprintf "Unknown type %s" s)
+
+let size_type (t: typ) : int res =
+  match t with
+  | Tint -> OK(8)
+  | Tchar -> OK(1)
+  | Tvoid -> Error "Cannot get size of void type"
+  | Tptr _ -> OK(8)
