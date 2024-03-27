@@ -82,7 +82,7 @@ let rec exec_linear_instr oc lp fname f sp st (i: rtl_instr) =
           )
         )
   | Rstk(rd, i) ->
-      Hashtbl.replace st.regs rd (sp + i);
+      Hashtbl.replace st.regs rd i;
       OK (None, st)
   | Rload(rd, rs, sz) ->
       begin match Hashtbl.find_option st.regs rs with

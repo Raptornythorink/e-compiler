@@ -13,6 +13,7 @@ type expr =
   | Ecall of string * expr list
   | Eaddrof of expr
   | Eload of expr
+  | Egetfield of expr * string
 
 type instr =
   | Iassign of string * expr
@@ -22,6 +23,7 @@ type instr =
   | Ireturn of expr
   | Icall of string * expr list
   | Istore of expr * expr
+  | Isetfield of expr * string * expr
 
 type efun = {
   funname: string;
@@ -33,4 +35,4 @@ type efun = {
   funstksz: int;
 }
 
-type eprog = efun prog
+type eprog = efun prog * (string, (string * typ) list) Hashtbl.t

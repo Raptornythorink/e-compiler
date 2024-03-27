@@ -31,6 +31,7 @@ type tag = Tassign | Tif | Twhile | Tblock | Treturn
          | Tfundef | Tfunname | Tfunargs | Tfunbody | Tfunrettype
          | Tvardef | Tassignvar | Tstore
          | Targ
+         | Tstructdef | Tstructname | Tstructfields | Tfielddef | Tgetfield | Tsetfield
          | Tcall | Targs
 
 type tree = | Node of tag * tree list
@@ -78,6 +79,12 @@ let string_of_tag = function
   | Tassignvar -> "Tassignvar"
   | Tstore -> "Tstore"
   | Targ -> "Targ"
+  | Tstructdef -> "Tstructdef"
+  | Tstructname -> "Tstructname"
+  | Tstructfields -> "Tstructfields"
+  | Tfielddef -> "Tfielddef"
+  | Tgetfield -> "Tgetfield"
+  | Tsetfield -> "Tsetfield"
   | Tcall -> "Tcall"
   | Targs -> "Targs"
 
