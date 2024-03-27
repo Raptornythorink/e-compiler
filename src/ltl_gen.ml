@@ -50,22 +50,22 @@ let make_loc_mov src dst =
   | Reg rsrc, Reg rdst ->
     [LMov(rdst,rsrc)]
 
-(* load_loc numlocals tmp allocation r = (l, r'). Loads the equivalent of RTL register r
+(* load_loc tmp allocation r = (l, r'). Loads the equivalent of RTL register r
    in a LTL register r'. tmpis used if necessary. *)
-let load_loc numlocals tmp allocation r =
+let load_loc tmp allocation r =
   match Hashtbl.find_option allocation r with
   | None ->
     Error (Format.sprintf "Unable to allocate RTL register r%d." r)
-  | Some (Stk o) -> OK ([LLoad(tmp, reg_fp, (Archi.wordsize ()) * (numlocals + o), (archi_mas ()))], tmp)
+  | Some (Stk o) -> OK ([LLoad(tmp, reg_fp, (Archi.wordsize ()) *  o, (archi_mas ()))], tmp)
   | Some (Reg r) -> OK ([], r)
 
-(* store_loc numlocals tmp allocation r = (l, r'). I want to write in RTL register r.
+(* store_loc tmp allocation r = (l, r'). I want to write in RTL register r.
    Tells me that I just have to write to LTL register r' and execute l. *)
-let store_loc numlocals tmp allocation r =
+let store_loc tmp allocation r =
   match Hashtbl.find_option allocation r with
   | None ->
     Error (Format.sprintf "Unable to allocate RTL register r%d." r)
-  | Some (Stk o) -> OK ([LStore(reg_fp, (Archi.wordsize ()) * (numlocals + o), tmp, (archi_mas ()))], tmp)
+  | Some (Stk o) -> OK ([LStore(reg_fp, (Archi.wordsize ()) * o, tmp, (archi_mas ()))], tmp)
   | Some (Reg r) -> OK ([], r)
 
 (* saves registers in [to_save] on the stack at offsets [fp + 8 * o, fp + 8 * (o
@@ -286,28 +286,28 @@ let ltl_instrs_of_linear_instr fname live_out allocation
   let res =
   match ins with
   | Rbinop (b, rd, rs1, rs2) ->
-    load_loc numlocals reg_tmp1 allocation rs1 >>= fun (l1, r1) ->
-    load_loc numlocals reg_tmp2 allocation rs2 >>= fun (l2, r2) ->
-    store_loc numlocals reg_tmp1 allocation rd >>= fun (ld, rd) ->
+    load_loc reg_tmp1 allocation rs1 >>= fun (l1, r1) ->
+    load_loc reg_tmp2 allocation rs2 >>= fun (l2, r2) ->
+    store_loc reg_tmp1 allocation rd >>= fun (ld, rd) ->
     OK (l1 @ l2 @ LBinop(b, rd, r1, r2) :: ld)
   | Runop (u, rd, rs) ->
-    load_loc numlocals reg_tmp1 allocation rs >>= fun (l1,r1) ->
-    store_loc numlocals reg_tmp1 allocation rd >>= fun (ld, rd) ->
+    load_loc reg_tmp1 allocation rs >>= fun (l1,r1) ->
+    store_loc reg_tmp1 allocation rd >>= fun (ld, rd) ->
     OK (l1 @ LUnop(u, rd, r1) :: ld)
   | Rconst (rd, i) ->
-    store_loc numlocals reg_tmp1 allocation rd >>= fun (ld, rd) ->
+    store_loc reg_tmp1 allocation rd >>= fun (ld, rd) ->
     OK (LConst(rd, i)::ld)
   | Rbranch (cmp, rs1, rs2, s1) ->
-    load_loc numlocals reg_tmp1 allocation rs1 >>= fun (l1, r1) ->
-    load_loc numlocals reg_tmp2 allocation rs2 >>= fun (l2, r2) ->
+    load_loc reg_tmp1 allocation rs1 >>= fun (l1, r1) ->
+    load_loc reg_tmp2 allocation rs2 >>= fun (l2, r2) ->
     OK (l1 @ l2 @ [LBranch(cmp, r1, r2, Format.sprintf "%s_%d" fname s1)])
   | Rjmp s -> OK [LJmp (Format.sprintf "%s_%d" fname s)]
   | Rmov (rd, rs) ->
-    load_loc numlocals reg_tmp1 allocation rs >>= fun (ls, rs) ->
-    store_loc numlocals reg_tmp1 allocation rd >>= fun (ld, rd) ->
+    load_loc reg_tmp1 allocation rs >>= fun (ls, rs) ->
+    store_loc reg_tmp1 allocation rd >>= fun (ld, rd) ->
     OK (ls @ LMov(rd, rs) :: ld)
   | Rret r ->
-    load_loc numlocals reg_tmp1 allocation r >>= fun (l,r) ->
+    load_loc reg_tmp1 allocation r >>= fun (l,r) ->
     OK (l @ [LMov (reg_ret, r) ; LJmp epilogue_label])
   | Rlabel l -> OK [LLabel (Format.sprintf "%s_%d" fname l)]
   | Rcall(None, f, rargs) ->
@@ -335,7 +335,7 @@ let ltl_instrs_of_linear_instr fname live_out allocation
       caller_save live_out allocation rargs >>= fun caller_saved ->
       let (save_regs_instructions, args_saved, ofs) = save_caller_save (Set.to_list caller_saved) (- (numspilled+numlocals+1)) in
       pass_parameters rargs allocation args_saved >>= fun (parameter_passing_instructions, npush) ->
-      store_loc numlocals reg_tmp1 allocation rd >>= fun (store_loc_instructions, rd) ->
+      store_loc reg_tmp1 allocation rd >>= fun (store_loc_instructions, rd) ->
       let restore_caller_save_instructions = restore_caller_save (List.remove_assoc rd args_saved) in
         OK(
           LComment "Saving caller-saved" ::
@@ -357,18 +357,32 @@ let ltl_instrs_of_linear_instr fname live_out allocation
           restore_caller_save_instructions
       )
     | Rstk(rd, i) -> 
-      store_loc numlocals reg_tmp1 allocation rd >>= fun (ld, rd) ->
+      store_loc reg_tmp1 allocation rd >>= fun (ld, rd) ->
       OK (LAddi(rd, reg_fp, i)::ld)
     | Rload(rd, rs, sz) ->
-      load_loc numlocals reg_tmp1 allocation rs >>= fun (ls, rs) ->
-      store_loc numlocals reg_tmp2 allocation rd >>= fun (ld, rd) ->
-      mas_of_size sz >>= fun mas ->
-      OK (ls @ [LLoad(rd, rs, 0, mas)] @ ld)
+      let rec load_multiple offset sz ls ld =
+        if sz > 0 then
+          let current_sz = min 8 sz in
+          mas_of_size current_sz >>= fun mas ->
+          load_loc reg_tmp1 allocation rs >>= fun (ls', rs') ->
+          store_loc reg_tmp2 allocation rd >>= fun (ld', rd') ->
+          load_multiple (offset + current_sz) (sz - current_sz) (ls @ ls' @ [LLoad(rd', rs', offset, mas)]) (ld @ ld')
+        else
+          OK (ls @ ld)
+      in
+      load_multiple 0 sz [] []
     | Rstore(rd, rs, sz) ->
-      load_loc numlocals reg_tmp1 allocation rd >>= fun (ld, rd) ->
-      load_loc numlocals reg_tmp2 allocation rs >>= fun (ls, rs) ->
-      mas_of_size sz >>= fun mas ->
-      OK (ls @ ld @ [LStore(rd, 0, rs, mas)])
+      let rec store_multiple offset sz ls ld =
+        if sz > 0 then
+          let current_sz = min (Archi.wordsize()) sz in
+          mas_of_size current_sz >>= fun mas ->
+          load_loc reg_tmp1 allocation rs >>= fun (ls', rs') ->
+          store_loc reg_tmp2 allocation rd >>= fun (ld', rd') ->
+          store_multiple (offset + current_sz) (sz - current_sz) (ls @ ls' @ [LStore(rd', offset, rs', mas)]) (ld @ ld')
+        else
+          OK (ls @ ld)
+      in
+      store_multiple 0 sz [] []
   in
   res >>= fun l ->
   OK (LComment (Format.asprintf "#<span style=\"background: pink;\"><b>Linear instr</b>: %a #</span>" (Rtl_print.dump_rtl_instr fname (None, None) ~endl:"") ins)::l)
@@ -393,9 +407,9 @@ let retrieve_nth_arg n numcalleesave =
 let ltl_fun_of_linear_fun linprog
     (({ linearfunargs; linearfunbody; linearfuninfo; linearfunstksz }): linear_fun) fname
     (live_in,live_out) (allocation, numspilled) =
-  let numlocals = linearfunstksz * (1 + (Archi.wordsize() mod 8) / 4) in
+  let numlocals = linearfunstksz / Archi.wordsize() in
   List.iteri (fun i pr ->
-      Hashtbl.replace allocation pr (retrieve_nth_arg i numlocals)
+      Hashtbl.replace allocation pr (retrieve_nth_arg i 0)
     ) linearfunargs;
   let written_regs = Set.add reg_ra
       (Set.add reg_fp
@@ -404,7 +418,7 @@ let ltl_fun_of_linear_fun linprog
     Set.intersect (Set.of_list callee_saved) written_regs in
   List.iteri (fun i pr ->
       Hashtbl.replace allocation pr
-        (retrieve_nth_arg i (Set.cardinal callee_saved_regs + numlocals))
+        (retrieve_nth_arg i (Set.cardinal callee_saved_regs))
     ) linearfunargs;
   let max_label =
     List.fold_left (fun acc i ->
@@ -416,11 +430,13 @@ let ltl_fun_of_linear_fun linprog
   let prologue =
     LComment "prologue" ::
     List.concat (List.map make_push (Set.to_list callee_saved_regs)) @
+    make_sp_sub(numlocals * Archi.wordsize ()) @
     LMov (reg_fp, reg_sp) ::
-    make_sp_sub ((numspilled + numlocals) * (Archi.wordsize ())) @
+    make_sp_sub (numspilled * Archi.wordsize ()) @
     [LComment "end prologue"] in
   let epilogue = LLabel epilogue_label ::
                  LMov(reg_sp, reg_fp) ::
+                 make_sp_add (numlocals * Archi.wordsize ()) @
                  List.concat (List.map make_pop
                                 (List.rev (Set.to_list callee_saved_regs))) @
                  [LJmpr reg_ra] in

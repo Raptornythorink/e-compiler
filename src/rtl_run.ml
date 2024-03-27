@@ -99,7 +99,7 @@ let rec exec_rtl_instr oc rp rtlfunname f sp st (i: rtl_instr) =
         )
     )
     | Rstk(rd, i) ->
-        Hashtbl.replace st.regs rd (sp + i);
+        Hashtbl.replace st.regs rd (i);
         OK (None, st)
     | Rload(rd, rs, sz) ->
         begin match Hashtbl.find_option st.regs rs with
@@ -112,11 +112,10 @@ let rec exec_rtl_instr oc rp rtlfunname f sp st (i: rtl_instr) =
     | Rstore(rd, rs, sz) ->
         begin match Hashtbl.find_option st.regs rd, Hashtbl.find_option st.regs rs with
         | Some addr, Some v ->
-          Mem.write_bytes st.mem addr (split_bytes sz v) >>= fun _ ->
+          Mem.write_bytes st.mem (addr) (split_bytes sz v) >>= fun _ ->
           OK (None, st)
         | Some addr, _ -> Error (Printf.sprintf "Store from undefined register (%s)" (print_reg rs))
         | _, _ -> Error (Printf.sprintf "Store to undefined register (%s)" (print_reg rd))
-        
         end
 
 and exec_rtl_instr_at oc rp rtlfunname ({ rtlfunbody;  } as f: rtl_fun) sp st i =
