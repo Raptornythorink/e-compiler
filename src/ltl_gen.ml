@@ -362,11 +362,11 @@ let ltl_instrs_of_linear_instr fname live_out allocation
     | Rload(rd, rs, sz) ->
       let rec load_multiple offset sz ls ld =
         if sz > 0 then
-          let current_sz = min (Archi.wordsize()) sz in
+          let current_sz = min 8 sz in
           mas_of_size current_sz >>= fun mas ->
           load_loc reg_tmp1 allocation rs >>= fun (ls', rs') ->
           store_loc reg_tmp2 allocation rd >>= fun (ld', rd') ->
-          load_multiple (offset + current_sz) (sz - current_sz) (ls @ ls' @ [LLoad(rd', rs', offset, mas); LBinop(Emul, rd, rd, (Archi.wordsize())); LBinop(Eadd, rd, rd, rd')]) (ld' @ ld)
+          load_multiple (offset + current_sz) (sz - current_sz) (ls @ ls' @ [LLoad(rd', rs', offset, mas)]) (ld @ ld')
         else
           OK (ls @ ld)
       in
