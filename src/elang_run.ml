@@ -81,6 +81,10 @@ let rec eval_eexpr prog oc typ_struct typ_var typ_fun (varinmem: (string, int) H
             size_type typ_struct t' >>= fun size ->
             Mem.read_bytes_as_int st'.mem v size >>= fun v' ->
             OK(v', st')
+         | Ttab(t', n) ->
+            size_type typ_struct t' >>= fun size ->
+            Mem.read_bytes_as_int st'.mem (v + size * n) size >>= fun v' ->
+            OK(v', st')
          | _ -> Error("E: Cannot load from this expression.\n")
       )
    | Ecall(f, args) -> 

@@ -74,6 +74,7 @@ type typ =
   | Tvoid
   | Tptr of typ
   | Tstruct of string
+  | Ttab of typ * int
 
 let rec string_of_typ t =
   match t with
@@ -82,6 +83,13 @@ let rec string_of_typ t =
   | Tvoid -> "void"
   | Tptr t' -> Printf.sprintf "%s*" (string_of_typ t')
   | Tstruct(structname) -> Printf.sprintf "struct %s" structname
+  | Ttab(ty, n) -> Printf.sprintf "%s[%d]" (string_of_typ ty) n
+
+let rec extract_int s n_string =
+  if String.ends_with s "[" then
+    (String.sub s 0 (String.length s - 1)), int_of_string n_string
+  else
+    extract_int (String.sub s 0 (String.length s - 1)) (String.sub s (String.length s - 1) 1 ^ n_string)
 
 let rec typ_of_string s =
   match s with
@@ -91,7 +99,10 @@ let rec typ_of_string s =
   | "*" -> Error "Cannot parse type * without a base type"
   | s when String.ends_with s "*" -> typ_of_string (String.sub s 0 (String.length s - 1)) >>= fun t -> OK (Tptr t)
   | s when String.starts_with s "struct " -> OK (Tstruct (String.sub s 7 (String.length s - 7)))
-  | _ -> Error (Printf.sprintf "Unknown type %s" s)
+  | s when String.ends_with s "]" -> 
+    let base, n = extract_int (String.sub s 0 (String.length s - 1)) "" in
+    typ_of_string base >>= fun t -> OK (Ttab(t, n))
+   | _ -> Error (Printf.sprintf "Unknown type %s" s)
 
 let rec size_type (structs: (string, (string * typ) list) Hashtbl.t) (t: typ) : int res =
   match t with
@@ -99,11 +110,13 @@ let rec size_type (structs: (string, (string * typ) list) Hashtbl.t) (t: typ) : 
   | Tchar -> OK(1)
   | Tvoid -> Error "Cannot get size of void type"
   | Tptr _ -> OK(8)
+  | Ttab(ty, n) -> size_type structs ty >>= fun size -> OK (size * n)
   | Tstruct(structname) ->
     match Hashtbl.find_option structs structname with
     | Some fields ->
       List.fold_left (fun acc (_, t) -> acc >>= fun acc -> size_type structs t >>= fun size -> OK (acc + size)) (OK 0) fields
     | None -> Error (Printf.sprintf "Unknown struct %s" structname)
+  
 
 let field_offset (structs: (string, (string * typ) list) Hashtbl.t) (s: string) (f: string) : int res =
   match Hashtbl.find_option structs s with
