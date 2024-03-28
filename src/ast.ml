@@ -32,6 +32,7 @@ type tag = Tassign | Tif | Twhile | Tblock | Treturn
          | Tvardef | Tassignvar | Tstore
          | Targ
          | Tstructdef | Tstructname | Tstructfields | Tfielddef | Tgetfield | Tsetfield
+         | Tgetindex | Tsetindex
          | Tcall | Targs
 
 type tree = | Node of tag * tree list
@@ -43,6 +44,10 @@ type tree = | Node of tag * tree list
 let string_of_stringleaf = function
   | StringLeaf s -> s
   | _ -> failwith "string_of_stringleaf called on non-stringleaf nodes."
+
+let string_of_intleaf = function
+  | IntLeaf i -> string_of_int i
+  | _ -> failwith "string_of_intleaf called on non-intleaf nodes."
 
 type astfun = (string list * tree)
 type ast = (string * astfun) list
@@ -85,6 +90,8 @@ let string_of_tag = function
   | Tfielddef -> "Tfielddef"
   | Tgetfield -> "Tgetfield"
   | Tsetfield -> "Tsetfield"
+  | Tgetindex -> "Tgetindex"
+  | Tsetindex -> "Tsetindex"
   | Tcall -> "Tcall"
   | Targs -> "Targs"
 

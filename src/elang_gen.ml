@@ -63,6 +63,15 @@ let compatible_types op t1 t2 =
   | op, Tptr(t1), Tptr(t2) -> (t1 = t2) && (is_cmp_op op)
   | _, Tptr(_), _ -> false
   | _, _, Tptr(_) -> false
+  | Eadd, Ttab(_, _), Tint -> true
+  | Eadd, Tint, Ttab(_, _) -> true
+  | Esub, Ttab(_, _), Tint -> true
+  | Eadd, Ttab(_, _), Tchar -> true
+  | Eadd, Tchar, Ttab(_, _) -> true
+  | Esub, Ttab(_, _), Tchar -> true
+  | op, Ttab(_, t1), Ttab(_, t2) -> (t1 = t2) && (is_cmp_op op)
+  | _, Ttab(_, _), _ -> false
+  | _, _, Ttab(_, _) -> false
   | _, _, _ -> true
 
 let rec type_expr (typ_struct : (string, (string * typ) list) Hashtbl.t) (typ_var : (string, typ) Hashtbl.t) (typ_fun : (string, typ list * typ) Hashtbl.t) (e: expr) : typ res =
@@ -106,6 +115,7 @@ let rec type_expr (typ_struct : (string, (string * typ) list) Hashtbl.t) (typ_va
     | Eaddrof(e) -> type_expr typ_struct typ_var typ_fun e >>= fun t -> OK(Tptr(t))
     | Eload(e) -> type_expr typ_struct typ_var typ_fun e >>= fun t -> (match t with
       | Tptr(t) -> OK(t)
+      | Ttab(t, n) -> OK(t)
       | _ -> Error(Printf.sprintf "Type error in Eload: expected pointer, got %s" (string_of_typ t))
     )
     | Egetfield(e, f) -> type_expr typ_struct typ_var typ_fun e >>= fun t -> (match t with
@@ -137,6 +147,7 @@ let rec addr_taken_expr (e: expr) : string Set.t =
   | Evar(v) -> (
     match typ_of_string v with
     | OK(Tstruct(_)) -> Set.singleton v
+    | OK(Ttab(_, _)) -> Set.singleton v
     | _ -> Set.empty
     )
   | Eaddrof(e) -> var_of_expr e
@@ -188,6 +199,10 @@ let rec make_eexpr_of_ast typ_struct typ_var typ_fun (a: tree) : expr res =
         | StringLeaf(f) -> OK(Egetfield(Eaddrof(exp), f))
         | _ -> Error(Printf.sprintf "Expected a field name, got %s" (string_of_ast e2))
         )
+    | Node(Tgetindex, [e1; e2]) ->
+      make_eexpr_of_ast typ_struct typ_var typ_fun e1 >>= fun exp1 ->
+      make_eexpr_of_ast typ_struct typ_var typ_fun e2 >>= fun exp2 ->
+      OK(Eload(Ebinop(Eadd, Eaddrof(exp1), exp2)))
     | _ -> Error (Printf.sprintf "Unacceptable ast in make_eexpr_of_ast %s"
                     (string_of_ast a))
   in
@@ -259,6 +274,11 @@ let rec make_einstr_of_ast typ_struct typ_var typ_fun (a: tree) : instr res =
         make_eexpr_of_ast typ_struct typ_var typ_fun e1 >>= fun exp1 ->
         make_eexpr_of_ast typ_struct typ_var typ_fun e2 >>= fun exp2 ->
         OK(Isetfield(Eaddrof(exp1), f, exp2))
+    | Node(Tsetindex, [e1; e2; e3]) ->
+        make_eexpr_of_ast typ_struct typ_var typ_fun e1 >>= fun exp1 ->
+        make_eexpr_of_ast typ_struct typ_var typ_fun e2 >>= fun exp2 ->
+        make_eexpr_of_ast typ_struct typ_var typ_fun e3 >>= fun exp3 ->
+        OK(Istore(Ebinop(Eadd, Eaddrof(exp1), exp2), exp3))
     | _ -> Error (Printf.sprintf "Unacceptable ast in make_einstr_of_ast %s"
                     (string_of_ast a))
   in
