@@ -73,6 +73,7 @@ type typ =
   | Tchar
   | Tvoid
   | Tptr of typ
+  | Tstruct of string
 
 let rec string_of_typ t =
   match t with
@@ -80,6 +81,7 @@ let rec string_of_typ t =
   | Tchar -> "char"
   | Tvoid -> "void"
   | Tptr t' -> Printf.sprintf "%s*" (string_of_typ t')
+  | Tstruct(structname) -> Printf.sprintf "struct %s" structname
 
 let rec typ_of_string s =
   match s with
@@ -88,11 +90,39 @@ let rec typ_of_string s =
   | "void" -> OK Tvoid
   | "*" -> Error "Cannot parse type * without a base type"
   | s when String.ends_with s "*" -> typ_of_string (String.sub s 0 (String.length s - 1)) >>= fun t -> OK (Tptr t)
+  | s when String.starts_with s "struct " -> OK (Tstruct (String.sub s 7 (String.length s - 7)))
   | _ -> Error (Printf.sprintf "Unknown type %s" s)
 
-let size_type (t: typ) : int res =
+let rec size_type (structs: (string, (string * typ) list) Hashtbl.t) (t: typ) : int res =
   match t with
   | Tint -> OK(8)
   | Tchar -> OK(1)
   | Tvoid -> Error "Cannot get size of void type"
   | Tptr _ -> OK(8)
+  | Tstruct(structname) ->
+    match Hashtbl.find_option structs structname with
+    | Some fields ->
+      List.fold_left (fun acc (_, t) -> acc >>= fun acc -> size_type structs t >>= fun size -> OK (acc + size)) (OK 0) fields
+    | None -> Error (Printf.sprintf "Unknown struct %s" structname)
+
+let field_offset (structs: (string, (string * typ) list) Hashtbl.t) (s: string) (f: string) : int res =
+  match Hashtbl.find_option structs s with
+  | Some fields ->
+    let rec aux acc = function
+      | [] -> Error (Printf.sprintf "Unknown field %s in struct %s" f s)
+      | (fname, t) :: tl when fname = f -> OK acc
+      | (_, t) :: tl -> size_type structs t >>= fun size -> aux (acc + size) tl
+    in
+    aux 0 fields
+  | None -> Error (Printf.sprintf "Unknown struct %s" s)
+
+let field_type (structs: (string, (string * typ) list) Hashtbl.t) (s: string) (f: string) : typ res =
+  match Hashtbl.find_option structs s with
+  | Some fields ->
+    let rec aux = function
+      | [] -> Error (Printf.sprintf "Unknown field %s in struct %s" f s)
+      | (fname, t) :: tl when fname = f -> OK t
+      | _ :: tl -> aux tl
+    in
+    aux fields
+  | None -> Error (Printf.sprintf "Unknown struct %s" s)

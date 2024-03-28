@@ -38,7 +38,7 @@ let rec eval_cfgexpr prog oc (sp: int) (funstksz: int) st (e: expr) : (int * int
           | None -> Error Printf.(sprintf "CFG: Function %s did not return a value\n" f)
         )
       )
-    | Estk(addr) -> OK(sp + addr, st)
+    | Estk(addr) -> OK(addr, st)
     | Eload(e, sz) ->
         eval_cfgexpr prog oc sp funstksz st e >>= fun (addr, st') ->
         Mem.read_bytes_as_int st'.mem addr sz >>= fun v ->
@@ -64,7 +64,7 @@ and eval_cfginstr prog oc (sp: int) (funstksz: int) st ht (n: int): (int * int s
     | Ccall(f, vargs, succ) -> 
         List.fold_left (fun acc e -> acc >>= fun (l, nst) -> eval_cfgexpr prog oc sp funstksz nst e >>= fun (v, nst') -> OK(l@[v], nst')) (OK([], st)) vargs >>= fun (args, st') ->
         (match find_function prog f with
-        | OK(fdef) -> eval_cfgfun prog oc (sp + funstksz) st' f fdef args >>= fun (_, st'') -> eval_cfginstr prog oc sp funstksz st'' ht succ
+        | OK(fdef) -> eval_cfgfun prog oc (funstksz) st' f fdef args >>= fun (_, st'') -> eval_cfginstr prog oc sp funstksz st'' ht succ
         | Error(_) -> do_builtin oc st'.mem f args >>= fun _ -> eval_cfginstr prog oc sp funstksz st' ht succ
         )
     | Cstore(e1, e2, sz, succ) ->
