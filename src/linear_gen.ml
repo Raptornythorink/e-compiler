@@ -14,36 +14,37 @@ let succs_of_rtl_instr (i: rtl_instr) =
   | Rtl.Rjmp s -> [s]
   | _ -> []
 
-let rec succs_of_rtl_instrs il : int list =
+let succs_of_rtl_instrs il : int list =
   List.concat (List.map succs_of_rtl_instr il)
 
 (* effectue un tri topologique des blocs.  *)
-let sort_blocks (nodes: (int, rtl_instr list) Hashtbl.t) entry =
-  let rec add_block order n =
-    (*if List.mem n order then order else
-      let norder = ref (n::order) in
-      let succs = succs_of_rtl_instrs (Hashtbl.find nodes n) in
-      List.iter (fun s -> norder := add_block !norder s) succs;
-      !norder*)
-    List.of_enum (Hashtbl.keys nodes) 
-  in
-  add_block [] entry
-
+let sort_blocks (nodes: (reg, rtl_instr list) Hashtbl.t) (entry:reg) =
+  let rec add_block order n = match Hashtbl.find_option nodes n with 
+   |None -> failwith "no instr for this reg"
+   |Some rtl_instr_list -> let succs = succs_of_rtl_instrs rtl_instr_list in 
+                          List.fold_left ( fun acc succ_n ->
+                            if List.mem succ_n acc then acc
+                            else add_block acc succ_n
+                          ) (order@[n]) (List.rev succs)
+in add_block [] entry
 
 (* Supprime les jumps inutiles (Jmp à un label défini juste en dessous). *)
-let rec remove_useless_jumps (l: rtl_instr list) =
-  match l with
-  | [] -> []
-  | Rjmp(l1)::Rlabel(l2)::t when l1 = l2 -> remove_useless_jumps (Rlabel(l2)::t)
-  | h::t -> h::(remove_useless_jumps t)
-
+let rec remove_useless_jumps (l: rtl_instr list) = 
+   match l with
+|[] -> l
+|(Rjmp lab)::(Rlabel lab')::q when lab=lab' -> (Rlabel lab)::(remove_useless_jumps q)
+|r::q -> r::(remove_useless_jumps q)
 
 (* Remove labels that are never jumped to. *)
-let remove_useless_labels (l: rtl_instr list) = l (*
-  let jmp_instrs = List.filter (function Rjmp(_) -> true | _ -> false) l in
-  List.filter (fun instr -> match instr with
-      | Rlabel(l) -> List.mem (Rjmp(l)) jmp_instrs
-      | _ -> true) l *)
+let remove_useless_labels (l: rtl_instr list) =
+   List.filter (fun instr -> match instr with 
+    |Rlabel n  -> List.exists (fun i -> match i with 
+                |Rjmp m when m=n -> true 
+                |Rbranch (_,_,_,m) when m=n -> true
+                | _ -> false
+                ) l
+    | _ -> true
+   ) l 
 
 let linear_of_rtl_fun
     ({ rtlfunargs; rtlfunbody; rtlfunentry; rtlfuninfo; rtlfunstksz }: rtl_fun) =
@@ -59,7 +60,7 @@ let linear_of_rtl_fun
     linearfunbody =
       linearinstrs |> remove_useless_jumps |> remove_useless_labels;
     linearfuninfo = rtlfuninfo;
-    linearfunstksz = rtlfunstksz;
+linearfunstksz = rtlfunstksz;
   }
 
 let linear_of_rtl_gdef = function
