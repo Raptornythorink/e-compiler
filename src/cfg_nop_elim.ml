@@ -60,7 +60,8 @@ let rec replace_succ nop_succs s = match nop_succs with
 let replace_succs nop_succs (n: cfg_node) = match n with 
    | Cassign (str, e, s) -> let s' = replace_succ nop_succs s in Cassign (str, e, s')
    | Creturn e -> n
-   | Cprint (e, s) -> let s' = replace_succ nop_succs s in Cprint (e, s')
+   | Ccall (str, e, s) -> let s' = replace_succ nop_succs s in Ccall (str, e, s') 
+   | Cstore(e1, e2, v, s) -> let s' = replace_succ nop_succs s in Cstore(e1, e2, v, s')
    | Ccmp (e, n1, n2) -> let s1 = replace_succ nop_succs n1 in 
                         let s2 = replace_succ nop_succs n2 in 
                         Ccmp (e, s1,s2)
