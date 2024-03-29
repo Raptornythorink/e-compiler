@@ -14,32 +14,30 @@ open Options
    Si le nœud [n] contient [Cnop s], alors [(n,s)] devrait être dans le résultat.
 *)
 let nop_transitions (cfgfunbody: (int, cfg_node) Hashtbl.t) : (int * int) list =
-   Hashtbl.fold (fun n node acc ->
-      match node with
-      | Cnop(s) -> (n, s)::acc
-      | _ -> acc
-   ) cfgfunbody []
+   Hashtbl.fold (
+      fun node cfg_node acc-> match cfg_node with
+      |Cnop s -> (node,s)::acc
+      |_ -> acc
+   )
+   cfgfunbody []
+
 
 (* [follow n l visited] donne le premier successeur à partir de [n] qui ne soit
-   pas un NOP. Pour connaître le successeur d'un nœud NOP, on utilisara la liste
+   pas un NOP. Pour connaître le successeur d'un nœud NOP, on utilisera la liste
    [l] telle que produite précédemment. Pour rappel [(x,y)] dans [l] signifie
-   qu'il y a un transition depuis un nœud [x] qui contient une instruction [Cnop
+   qu'il y a une transition depuis un nœud [x] qui contient une instruction [Cnop
    y].
 
    L'ensemble [visited] est utilisé pour éviter les boucles.
    *)
 let rec follow (n: int) (l: (int * int) list) (visited: int Set.t) : int =
    match l with
-   | [] -> n
-   | (x, y)::q ->
-      if x = n then
-         if Set.mem y visited then n
-         else follow y l (Set.add y visited)
-      else follow n q visited
+   |(x,y)::q when not(Set.mem x visited)-> if x = n then follow y q (Set.add n visited) else follow n q visited
+   | _ -> n
 
 (* [nop_transitions_closed] contient la liste [(n,s)] telle que l'instruction au
    nœud [n] est le début d'une chaîne de NOPs qui termine au nœud [s]. Les
-   enseignants du cours de compiilation sont heureux de vous offrir cette
+   enseignants du cours de compilation sont heureux de vous offrir cette
    fonction. *)
 let nop_transitions_closed cfgfunbody =
   List.map (fun (node_id, node) ->
@@ -53,17 +51,21 @@ let nop_transitions_closed cfgfunbody =
 
 (* [replace_succ nop_succs s] donne le nouveau nom du nœud [s], en utilisant la
    liste [nop_succs] (telle que renvoyée par [nop_transitions_closed]). *)
-let replace_succ nop_succs s =
-   match List.assoc_opt s nop_succs with
-   | None -> s
-   | Some s' -> s'
-
+let rec replace_succ nop_succs s = match nop_succs with
+   |(x,y)::q when x=s -> y
+   |(x,y)::q -> replace_succ q s
+   | _ -> s
 (* [replace_succs nop_succs n] remplace le nœud [n] par un nœud équivalent où on
    a remplacé les successeurs, en utilisant la liste [nop_succs]. *)
-let replace_succs nop_succs (n: cfg_node) =
-   match n with
-   | Cnop(s) -> Cnop(replace_succ nop_succs s)
-   | _ -> n
+let replace_succs nop_succs (n: cfg_node) = match n with 
+   | Cassign (str, e, s) -> let s' = replace_succ nop_succs s in Cassign (str, e, s')
+   | Creturn e -> n
+   | Ccall (str, e, s) -> let s' = replace_succ nop_succs s in Ccall (str, e, s') 
+   | Cstore(e1, e2, v, s) -> let s' = replace_succ nop_succs s in Cstore(e1, e2, v, s')
+   | Ccmp (e, n1, n2) -> let s1 = replace_succ nop_succs n1 in 
+                        let s2 = replace_succ nop_succs n2 in 
+                        Ccmp (e, s1,s2)
+   | Cnop s -> let s' = replace_succ nop_succs s in Cnop s'
 
 (* [nop_elim_fun f] applique la fonction [replace_succs] à chaque nœud du CFG. *)
 let nop_elim_fun ({ cfgfunargs; cfgfunbody; cfgentry } as f: cfg_fun) =
@@ -76,15 +78,17 @@ let nop_elim_fun ({ cfgfunargs; cfgfunbody; cfgentry } as f: cfg_fun) =
      (inaccessibles), et appliquer la fonction [replace_succs] aux nœuds qui
      resteront.
   *)
-   let new_cfgentry = replace_succ nop_transf cfgentry in
-   let new_cfgfunbody = Hashtbl.map (fun n node -> replace_succs nop_transf node) cfgfunbody in
-   Hashtbl.filter_map_inplace (
-      fun n node -> if (n <> new_cfgentry && Set.is_empty (preds new_cfgfunbody n)) then None else Some node
-      ) new_cfgfunbody;
-
+  let cfgfunbody = Hashtbl.map (fun n node ->
+         (replace_succs nop_transf node)
+    ) cfgfunbody in
+   let cfgfunbody = Hashtbl.filter (fun node ->
+         match node with
+         | Cnop _ -> false
+         |_ -> true 
+      ) cfgfunbody in
   (* La fonction renvoyée est composée du nouveau [cfgfunbody] que l'on vient de
      calculer, et le point d'entrée est transformé en conséquence. *)
-  {f with cfgfunbody = new_cfgfunbody; cfgentry = new_cfgentry }
+  {f with cfgfunbody; cfgentry = replace_succ nop_transf cfgentry }
 
 let nop_elim_gdef gd =
   match gd with
